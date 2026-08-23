@@ -13,7 +13,7 @@ decisions that are already settled there — §0 lists the locked ones.
 
 Build order is §14 of the spec.
 
-- [ ] 1. Data model + run store + index + `compute_confidence()` unit tests
+- [x] 1. Data model + run store + index + `compute_confidence()` unit tests
 - [ ] 2. `QuestionPort` + CLI port, incl. two-attempt escape-hatch swap
 - [ ] 3. Phase 0 intake
 - [ ] 4. Phase 1 probe + coverage gate
