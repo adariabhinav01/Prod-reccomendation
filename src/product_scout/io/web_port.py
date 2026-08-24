@@ -34,3 +34,10 @@ class WebQuestionPort:
             "Implement against HTTP when the web interface is built; "
             "QuestionPort's contract (io/port.py) does not change."
         )
+
+    async def ask_text(self, prompt: str) -> str:
+        raise NotImplementedError(
+            "WebQuestionPort is a stub (§0: 'terminal CLI now, web later'). "
+            "Implement against HTTP when the web interface is built; "
+            "QuestionPort's contract (io/port.py) does not change."
+        )
