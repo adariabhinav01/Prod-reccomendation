@@ -160,3 +160,24 @@ def test_full_not_sure_then_no_preference_round_trip():
         )
     )
     assert second == "no_preference"
+
+
+# -- ask_text — free-form input, no options (§7, Phase 0 intake) --------
+
+
+def test_ask_text_returns_stripped_input():
+    port, _ = make_port(["  500  "])
+    answer = run(port.ask_text("What's the dollar amount?"))
+    assert answer == "500"
+
+
+def test_ask_text_prints_the_prompt():
+    port, printed = make_port(["some answer"])
+    run(port.ask_text("What's the current model you own?"))
+    assert "What's the current model you own?" in printed
+
+
+def test_ask_text_allows_empty_string():
+    port, _ = make_port([""])
+    answer = run(port.ask_text("Any required features?"))
+    assert answer == ""

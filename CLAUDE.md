@@ -15,7 +15,7 @@ Build order is §14 of the spec.
 
 - [x] 1. Data model + run store + index + `compute_confidence()` unit tests
 - [x] 2. `QuestionPort` + CLI port, incl. two-attempt escape-hatch swap
-- [ ] 3. Phase 0 intake
+- [x] 3. Phase 0 intake
 - [ ] 4. Phase 1 probe + coverage gate
 - [ ] 5. Discovery + extraction (Haiku)
 - [ ] 6. Renderer against fixture data

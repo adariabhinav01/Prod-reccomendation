@@ -29,6 +29,19 @@ counter either side maintains — the `escape_hatch` argument to `ask()` IS
 the attempt state. Phase code (phases/refine.py, step 6) still has to make
 two calls with two different `escape_hatch` values, but it never needs its
 own `attempt = 1; attempt += 1` bookkeeping to know which hatch to offer.
+
+### Free text (`ask_text`)
+
+`ask()` is strictly 2-4 fixed options — that's the shape the `ask_user` SDK
+tool (§3) exposes to models, and it's the right shape for the §9 loop. But
+some questions have no fixed option set at all: a dollar amount, a list of
+required features, a list of named candidate products (§7, Phase 0 intake).
+`ask_text` covers those — free-form input, no options, no escape hatch (the
+§9 loop is Phase 6/7-specific; Phase 0's fixed questions use `ask(...,
+escape_hatch="none")` and `ask_text` for exactly this reason). It returns
+the raw (stripped) string, including the empty string for a legitimately
+optional answer (e.g. "no required features") — the caller decides what an
+empty answer means, the port doesn't guess.
 """
 
 from __future__ import annotations
@@ -61,6 +74,13 @@ class QuestionPort(Protocol):
       the user picked the appended hatch instead. Never return the hatch's
       display label — callers match on the sentinel value, not on text
       that's meant to change if the label copy changes.
+
+    `ask_text` implementations must:
+
+    - Present `prompt` to the user and collect one line of free-form text.
+    - Return it stripped of leading/trailing whitespace. Empty string is a
+      valid return (no options to reject it against) — the caller decides
+      what an empty answer means.
     """
 
     async def ask(
@@ -69,3 +89,5 @@ class QuestionPort(Protocol):
         options: list[str],
         escape_hatch: EscapeHatch = "not_sure",
     ) -> str: ...
+
+    async def ask_text(self, prompt: str) -> str: ...

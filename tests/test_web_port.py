@@ -17,3 +17,8 @@ def test_web_port_satisfies_question_port():
 def test_web_port_ask_raises_not_implemented():
     with pytest.raises(NotImplementedError):
         asyncio.run(WebQuestionPort().ask("Q?", ["a", "b"]))
+
+
+def test_web_port_ask_text_raises_not_implemented():
+    with pytest.raises(NotImplementedError):
+        asyncio.run(WebQuestionPort().ask_text("What's the amount?"))

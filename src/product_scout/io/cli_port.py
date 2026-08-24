@@ -3,8 +3,10 @@ order step 2).
 
 Renders `question` and a numbered menu of `options` (plus the escape hatch,
 per `io/port.py`), reads a line from stdin, and loops on unrecognized input
-rather than guessing. `input_fn`/`print_fn` are injectable so tests drive
-this without a real terminal.
+rather than guessing. `ask_text` (step 3, §7) renders a free-form prompt
+instead and returns whatever line comes back, unvalidated — there's no
+fixed option set to loop against. `input_fn`/`print_fn` are injectable so
+tests drive this without a real terminal.
 """
 
 from __future__ import annotations
@@ -95,3 +97,11 @@ class CLIQuestionPort:
             if raw.lower() == opt.lower():
                 return opt
         return None
+
+    async def ask_text(self, prompt: str) -> str:
+        return await asyncio.to_thread(self._ask_text_sync, prompt)
+
+    def _ask_text_sync(self, prompt: str) -> str:
+        self._print()
+        self._print(prompt)
+        return self._input("> ").strip()
