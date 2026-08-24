@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from product_scout.models import (
+    BroaderCategory,
     CoverageReport,
     EvidenceProfile,
     Product,
@@ -28,6 +29,29 @@ def make_evidence_profile(**overrides) -> EvidenceProfile:
     )
     defaults.update(overrides)
     return EvidenceProfile(**defaults)
+
+
+def make_broader_category(**overrides) -> BroaderCategory:
+    defaults = dict(
+        name="broader widgets",
+        rationale="Wider category with an established review economy.",
+        estimated_coverage="rich",
+    )
+    defaults.update(overrides)
+    return BroaderCategory(**defaults)
+
+
+def make_coverage_report(**overrides) -> CoverageReport:
+    defaults = dict(
+        estimated_product_count=8,
+        independent_review_sources_found=5,
+        has_methodology_backed_testing=True,
+        coverage="rich",
+        suggested_broader_categories=[],
+        notes="Well-covered category.",
+    )
+    defaults.update(overrides)
+    return CoverageReport(**defaults)
 
 
 def make_sourced_value(**overrides) -> SourcedValue:
