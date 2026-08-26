@@ -33,3 +33,15 @@ MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 6
 # name, shared by product_scout.skills.assert_skill_loaded() and every real
 # SDK adapter's ClaudeAgentOptions(skills=[...]).
 RESEARCH_PROTOCOL_SKILL: str = "research-protocol"
+
+# §11 — source tiering, named once so the renderer's sources section (§5.4,
+# build order step 6) and any future phase can display a human-readable
+# label instead of a bare int. `SourcedValue.source_tier` is validated
+# ge=1, le=5 in models.py; keys here must stay exhaustive over that range.
+TIER_LABELS: dict[int, str] = {
+    1: "Tier 1 — Manufacturer / first-party spec page",
+    2: "Tier 2 — Independent testing outlet (methodology disclosed)",
+    3: "Tier 3 — Review aggregator / enthusiast site",
+    4: "Tier 4 — Retailer listing",
+    5: "Tier 5 — Community source (forum, video, owner review)",
+}

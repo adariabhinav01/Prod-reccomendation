@@ -18,7 +18,7 @@ Build order is §14 of the spec.
 - [x] 3. Phase 0 intake
 - [x] 4. Phase 1 probe + coverage gate
 - [x] 5. Discovery + extraction (Haiku)
-- [ ] 6. Renderer against fixture data
+- [x] 6. Renderer against fixture data
 - [ ] 7. Phase 7 analysis (Opus) + constraint enforcement
 - [ ] 8. Timing + prior-gen passes
 - [ ] 9. Low-evidence mode end to end
