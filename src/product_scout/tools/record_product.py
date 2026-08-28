@@ -1,34 +1,67 @@
-"""`record_product` — the Extraction-phase MCP tool (spec docs/handoff.md §3,
-build order step 5).
+"""`record_product` — the EXTRACTION-phase MCP tool (spec docs/handoff.md
+§3/§4/§4.3, build order step 8).
 
-This is the primary enforcement point for CLAUDE.md invariant 2 ("No source,
-no field... An extractor that can't cite one omits the field rather than
-inventing it. Enforced in validation, not just in prompts") and invariant 3
-("confidence is computed in Python from evidence counts and is never
-model-assigned"). Both are enforced structurally here, not just documented:
+Rewritten against the current (v7) `Product`/`PricingModel`/`Availability`/
+`SourcedValue`/`EvidenceProfile` schemas in `models.py` — the version this
+replaces was built at build order step 5 against a pre-v7 shape
+(`price_usd`, a flat `price_source_url`, integer `source_tier`, a model-
+reported `independent_review_count`/`has_methodology_backed_source`) that
+no longer matches `models.py` at all; `phases/survey.py`'s own docstring
+already flagged this file as carrying that debt.
 
-- Invariant 2: every `specs[*]` entry is built as a real `SourcedValue`
-  (`models.py`'s own `_require_real_url` validator rejects "", "N/A", and
-  non-http(s) URLs); any that fail reject the *whole* call — nothing partial
-  ever reaches the sink — with a message naming every bad field so the model
-  can drop them all and re-call once.
-- Invariant 3: `RECORD_PRODUCT_SCHEMA` has no `confidence`,
-  `corroboration_ratio`, or `conflict_ratio` property at all, and sets
-  `"additionalProperties": false` at the top level — the model cannot supply
-  a confidence value even if it tried; jsonschema rejects the call before
-  the handler runs. `confidence` is always computed via `models.py`'s
-  existing `compute_confidence()`.
+This remains the primary enforcement point for two invariants, exactly as
+before, plus a third this build step adds:
 
-### SPEC GAP-FILL — `confidence_note` is deterministic, not model-supplied
+- **Invariant 3 ("no source, no field").** Every `SourcedValue`
+  (`specs[*]`, `ownership_notes[*]`) and `pricing.price_source_url` must be
+  a real, well-formed `http(s)` URL — `SourcedValue`'s own validator
+  (`models.py`) already enforces the *shape*; rejected calls name every
+  bad field so the model can drop them and re-call once.
+- **Invariant 4 ("confidence is computed in Python, never model-
+  assigned").** `RECORD_PRODUCT_SCHEMA` has no `confidence`,
+  `corroboration_ratio`, `conflict_ratio`, `independent_review_count`, or
+  `has_methodology_backed_source` property at all, and sets
+  `"additionalProperties": false` throughout — the model cannot supply any
+  of these even if it tried. Unlike the file this replaces,
+  `independent_review_count`/`has_methodology_backed_source` are no longer
+  model-reported inputs either: `confidence.py`'s `build_evidence_profile`
+  (build order step 1) derives *both* straight from `review_sources`/
+  `specs`/`ownership_notes`, which this handler already validates. A
+  model that can't set confidence but *could* set its own review count
+  wouldn't actually be out of the loop — CLAUDE.md invariant 4 names this
+  exact failure mode.
+- **§4.3 ledger validation (this build step).** Every `source_url` is
+  checked against a run-scoped `hooks.ledger.FetchLedger` before
+  construction — presence of a well-formed URL was never a hallucination
+  guard (a model can invent a plausible one); only a ledger the model
+  didn't write to itself can be. Specs and price require a `fetched`
+  entry (§4.3: "Spec values require a fetched entry. A search snippet is
+  not a page."); `ownership_notes` and `review_sources` — both judgment-
+  bearing per §14 — accept either `fetched` or `seen_not_fetched`.
 
-§4 describes `confidence_note` as "one line: what drove this level" but
-doesn't say who writes it. Generating it deterministically from the same
-evidence numbers that feed `compute_confidence()` (rather than asking the
-model for a free-text note) keeps the same invariant-3 spirit — a
-model-authored explanation of a model-uninfluenced number is a smaller but
-analogous laundering risk. If a future step wants model-authored nuance
-(e.g. explaining *why* corroboration was low), that belongs in a
-separately-labeled field, not a weakened `confidence_note`.
+### `Availability` and `role` are intentionally minimal here
+
+`Availability`'s full shape (`ships_from`, `ships_from_signal`, the §10.6
+inference ladder, landed pricing) is explicitly a later, separate build
+step ("11. Location end to end") — this handler accepts only
+`sold_in_region` from the model and fills the rest with the "not yet
+determined" defaults (`ships_from_confidence=0.0` — never model-supplied;
+CLAUDE.md invariant 4 names this field specifically alongside
+`confidence`). `role` defaults to `Product`'s own default
+(`"recommendation"`) when the model omits it; baseline/reference role-
+tagging logic (§7.2) isn't wired at the prompt level in this step either.
+
+### Construction is two-pass: placeholder evidence, then the real one
+
+`build_evidence_profile(product, survey, ...)` takes an already-built
+`Product` — it reads `product.specs`/`ownership_notes`/`review_sources`
+directly (§4.0d). So a *draft* `Product` is built first with a coherent-
+but-empty placeholder `EvidenceProfile` (`source_count=0`, both ratios
+`0.0` — trivially satisfies `EvidenceProfile`'s own coherence validator),
+then `build_evidence_profile` computes the real one from that draft, and
+`model_copy(update={"evidence": ...})` produces the final `Product`. This
+mirrors `confidence.py`'s own two-step "provisional, then reassign"
+pattern rather than inventing a second one.
 """
 
 from __future__ import annotations
@@ -38,7 +71,29 @@ from typing import Any, Protocol, runtime_checkable
 from claude_agent_sdk import tool
 from pydantic import ValidationError
 
-from product_scout.models import EvidenceProfile, Product, SourcedValue, compute_confidence
+from product_scout.confidence import build_evidence_profile
+from product_scout.hooks.ledger import FetchLedger
+from product_scout.models import (
+    Availability,
+    EvidenceProfile,
+    PricingModel,
+    Product,
+    SourcedValue,
+    SurveyReport,
+)
+
+_PLACEHOLDER_EVIDENCE = EvidenceProfile(
+    source_count=0,
+    independent_review_count=0,
+    extracted_spec_count=0,
+    has_tier1_specs=False,
+    has_methodology_backed_source=False,
+    corroboration_ratio=0.0,
+    conflict_ratio=0.0,
+    recency_factor=0.0,
+    confidence=0.0,
+    confidence_note="",
+)
 
 
 @runtime_checkable
@@ -61,36 +116,100 @@ class ListProductSink:
 
 _SOURCED_VALUE_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "value": {"type": "string"},
+        "native_unit": {"type": ["string", "null"]},
         "source_url": {"type": "string"},
-        "source_tier": {"type": "integer", "minimum": 1, "maximum": 5},
+        "source_type": {
+            "type": "string",
+            "enum": ["manufacturer", "testing_outlet", "aggregator", "retailer", "community"],
+        },
+        "has_stated_methodology": {"type": "boolean"},
         "corroborated_by": {"type": "array", "items": {"type": "string"}},
         "conflicting_values": {"type": "array", "items": {"type": "string"}},
+        "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp for when this value was observed.",
+        },
     },
-    "required": ["value", "source_url", "source_tier"],
+    "required": ["value", "source_url", "source_type", "has_stated_methodology", "observed_at"],
+}
+
+_PRICING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "model_type": {
+            "type": "string",
+            "enum": [
+                "one_time",
+                "subscription_only",
+                "one_time_plus_subscription",
+                "freemium",
+                "usage_based",
+                "financed_major_purchase",
+            ],
+        },
+        "upfront_amount": {"type": ["number", "null"]},
+        "recurring_amount": {"type": ["number", "null"]},
+        "recurring_period": {"type": ["string", "null"], "enum": ["monthly", "annual", None]},
+        "recurring_required_for_core": {"type": "boolean"},
+        "total_cost_1yr": {
+            "type": ["number", "null"],
+            "description": "Null for usage_based and financed_major_purchase model types (§11.3).",
+        },
+        "price_currency": {"type": "string"},
+        "price_tax_inclusive": {
+            "type": ["boolean", "null"],
+            "description": "Null when undetermined (§10.3a) — never guess.",
+        },
+        "price_source_url": {"type": "string"},
+        "price_observed_at": {"type": "string", "format": "date-time"},
+    },
+    "required": ["model_type", "price_currency", "price_source_url", "price_observed_at"],
+}
+
+_AVAILABILITY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "sold_in_region": {"type": "boolean"},
+    },
+    "required": ["sold_in_region"],
 }
 
 RECORD_PRODUCT_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "additionalProperties": False,  # invariant 3: no confidence/*_ratio smuggled in
+    "additionalProperties": False,  # invariant 4: no confidence/ratios/review-count smuggled in
     "properties": {
         "name": {"type": "string"},
         "brand": {"type": "string"},
         "generation": {"type": "string", "enum": ["current", "prior"]},
-        "price_usd": {"type": "number", "exclusiveMinimum": 0},
-        "price_source_url": {"type": "string"},
-        "price_observed_at": {
+        "role": {
             "type": "string",
-            "format": "date-time",
-            "description": "ISO 8601 timestamp for when this price was observed.",
+            "enum": [
+                "recommendation",
+                "baseline_current",
+                "reference_above_budget",
+                "reference_unavailable",
+                "reference_displaced",
+            ],
         },
+        "cluster_key": {"type": "string"},
+        "cluster_rationale": {"type": "string"},
+        "strength_archetype": {"type": "string"},
+        "pricing": _PRICING_SCHEMA,
+        "availability": _AVAILABILITY_SCHEMA,
         "specs": {
             "type": "object",
             "description": (
                 "Spec name -> sourced value. Omit a spec entirely if you "
-                "cannot cite a real http(s) source_url for it — never "
-                "invent one (invariant 2: no source, no field)."
+                "cannot cite a real http(s) source_url you actually "
+                "fetched — never invent one (invariant 3: no source, no "
+                "field). A source_url you only saw in search results, "
+                "never fetched, is not admissible here."
             ),
             "additionalProperties": _SOURCED_VALUE_SCHEMA,
         },
@@ -99,136 +218,144 @@ RECORD_PRODUCT_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 1,
+            "description": "At least one real drawback — this app is not a sales tool.",
+        },
+        "ownership_notes": {
+            "type": "array",
+            "items": _SOURCED_VALUE_SCHEMA,
             "description": (
-                "At least one real drawback — this app is not a sales tool."
+                "Community sentiment on reliability, longevity, ownership "
+                "experience (§14) — a source_url only seen in search "
+                "results is admissible here, unlike specs."
             ),
         },
-        "strength_archetype": {
-            "type": "string",
-            "enum": [
-                "value",
-                "performance",
-                "aesthetic",
-                "durability",
-                "ergonomics",
-                "features",
-                "support",
-            ],
-        },
-        "in_budget": {"type": "boolean"},
         "review_sources": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 1,
+            "description": "Distinct sources you actually used for judgment.",
         },
-        "independent_review_count": {
-            "type": "integer",
-            "minimum": 0,
-            "description": (
-                "Distinct Tier 2/3 sources you actually used for judgment, "
-                "not just cited for specs."
-            ),
-        },
-        "has_methodology_backed_source": {
-            "type": "boolean",
-            "description": (
-                "True iff >=1 source disclosed a testing methodology "
-                "(number of units tested, or published measurements)."
-            ),
-        },
+        "in_budget": {"type": "boolean"},
     },
     "required": [
         "name",
         "brand",
         "generation",
-        "price_usd",
-        "price_source_url",
-        "price_observed_at",
+        "cluster_key",
+        "cluster_rationale",
+        "strength_archetype",
+        "pricing",
+        "availability",
         "specs",
         "pros",
         "cons",
-        "strength_archetype",
-        "in_budget",
         "review_sources",
-        "independent_review_count",
-        "has_methodology_backed_source",
+        "in_budget",
     ],
 }
 
 
-def _build_confidence_note(evidence: EvidenceProfile) -> str:
-    """Deterministic one-liner — see module SPEC GAP-FILL note above."""
-    methodology = (
-        "with methodology-backed testing"
-        if evidence.has_methodology_backed_source
-        else "without methodology-backed testing"
-    )
+def _ledger_rejection_reason(ledger: FetchLedger, url: str) -> str:
+    """Human-readable reason for a §4.3 ledger rejection — distinguishes
+    "never seen at all" from "seen but only via search," since the second
+    is specifically what a model should learn to fix by fetching the page
+    rather than by finding a different citation entirely."""
+    mode = ledger.mode_for(url)
+    if mode == "seen_not_fetched":
+        return (
+            "was only seen in search results, never fetched — spec/price "
+            "values require a real fetch, not a snippet (§4.3)"
+        )
     return (
-        f"{evidence.independent_review_count} independent review(s), "
-        f"{methodology}, {evidence.corroboration_ratio:.0%} of specs "
-        f"corroborated, {evidence.conflict_ratio:.0%} conflicting."
+        "was never fetched or searched in this run — the ledger has no "
+        "record of it (§4.3); a well-formed URL is not enough, since a "
+        "model can invent a plausible one"
     )
 
 
-def _derive_evidence_profile(
-    specs: dict[str, SourcedValue],
-    independent_review_count: int,
-    has_methodology_backed_source: bool,
-) -> EvidenceProfile:
-    """Every field here is either passed through from a model-supplied fact
-    that isn't mechanically derivable (`independent_review_count`,
-    `has_methodology_backed_source`), or computed straight from `specs` —
-    never from anything the model asserts about its own confidence."""
-    has_tier1_specs = any(sv.source_tier == 1 for sv in specs.values())
-    n_specs = len(specs)
-    if n_specs == 0:
-        corroboration_ratio = 0.0
-        conflict_ratio = 0.0
-    else:
-        corroboration_ratio = sum(
-            1 for sv in specs.values() if sv.corroborated_by
-        ) / n_specs
-        conflict_ratio = sum(
-            1 for sv in specs.values() if sv.conflicting_values
-        ) / n_specs
+def _validate_sourced_value(
+    raw: dict[str, Any], ledger: FetchLedger, *, require_fetched: bool, label: str
+) -> tuple[SourcedValue | None, str | None]:
+    """Shape first (via `SourcedValue`'s own validator), then §4.3 ledger
+    admissibility — in that order, so a structurally-invalid URL ("N/A",
+    empty, non-http) gets pydantic's own specific message rather than the
+    less-actionable "not in ledger" one."""
+    try:
+        sourced_value = SourcedValue(**raw)
+    except ValidationError as e:
+        return None, f"{label}: {e}"
 
-    evidence = EvidenceProfile(
-        independent_review_count=independent_review_count,
-        has_tier1_specs=has_tier1_specs,
-        has_methodology_backed_source=has_methodology_backed_source,
-        corroboration_ratio=corroboration_ratio,
-        conflict_ratio=conflict_ratio,
-        confidence=0.0,  # provisional; computed below (models.py's own pattern)
-        confidence_note="",  # filled in below
-    )
-    evidence.confidence = compute_confidence(evidence)
-    evidence.confidence_note = _build_confidence_note(evidence)
-    return evidence
+    if not ledger.is_admissible(sourced_value.source_url, require_fetched=require_fetched):
+        return None, f"{label}.source_url {_ledger_rejection_reason(ledger, sourced_value.source_url)}"
+
+    return sourced_value, None
 
 
-def make_record_product(sink: ProductSink):
-    """Factory mirroring the spec's `make_ask_user(port)` pattern (§3)."""
+def _rejection(text: str) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": f"record_product rejected: {text}"}],
+        "is_error": True,
+    }
+
+
+def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLedger):
+    """Factory mirroring `phases/refine.py`'s `Refiner`-seam-style
+    dependency injection. `survey` is needed for
+    `build_evidence_profile`'s `comparison_specs`/`category_kind` (§4.0d);
+    `ledger` is the §4.3 enforcement point — both are the *same* instances
+    the rest of a live run uses, per `hooks/ledger.py`'s "run-scoped, not
+    phase-scoped" requirement."""
 
     @tool(
         "record_product",
         "Record one fully-researched product with its sourced specs. Every "
-        "spec you include must carry a real, citable http(s) source_url — "
-        "omit any field you cannot source rather than inventing a URL. "
-        "Rejected calls tell you exactly which field(s) to drop.",
+        "spec you include must carry a real, citable http(s) source_url "
+        "you actually fetched — omit any field you cannot source rather "
+        "than inventing a URL, and never cite a URL you only saw in "
+        "search results. Rejected calls tell you exactly which field(s) "
+        "to drop or re-fetch.",
         RECORD_PRODUCT_SCHEMA,
     )
     async def record_product(args: dict[str, Any]) -> dict[str, Any]:
-        # 1. Build each spec individually so a bad source_url can be
-        #    reported by name, not just "validation failed somewhere" — and
-        #    so the whole call rejects rather than silently dropping the
-        #    offending spec and recording a partial product.
         bad_fields: list[str] = []
+
+        # 1. specs — require a `fetched` ledger entry (§4.3: spec values
+        #    are facts, never judgment).
         specs: dict[str, SourcedValue] = {}
         for spec_name, raw in args["specs"].items():
-            try:
-                specs[spec_name] = SourcedValue(**raw)
-            except ValidationError:
-                bad_fields.append(f"specs[{spec_name!r}].source_url")
+            sourced_value, error = _validate_sourced_value(
+                raw, ledger, require_fetched=True, label=f"specs[{spec_name!r}]"
+            )
+            if error:
+                bad_fields.append(error)
+            else:
+                specs[spec_name] = sourced_value  # type: ignore[assignment]
+
+        # 2. ownership_notes — judgment-bearing (§14): either access mode
+        #    admissible.
+        ownership_notes: list[SourcedValue] = []
+        for i, raw in enumerate(args.get("ownership_notes", [])):
+            sourced_value, error = _validate_sourced_value(
+                raw, ledger, require_fetched=False, label=f"ownership_notes[{i}]"
+            )
+            if error:
+                bad_fields.append(error)
+            else:
+                ownership_notes.append(sourced_value)  # type: ignore[arg-type]
+
+        # 3. price_source_url — require fetched, same tier as specs.
+        pricing_raw = args["pricing"]
+        price_source_url = pricing_raw.get("price_source_url", "")
+        if not ledger.is_admissible(price_source_url, require_fetched=True):
+            bad_fields.append(
+                f"pricing.price_source_url {_ledger_rejection_reason(ledger, price_source_url)}"
+            )
+
+        # 4. review_sources — bare URLs, judgment-bearing (used for
+        #    independent_review_count, §14): either access mode admissible.
+        for i, url in enumerate(args["review_sources"]):
+            if not ledger.is_admissible(url, require_fetched=False):
+                bad_fields.append(f"review_sources[{i}] {_ledger_rejection_reason(ledger, url)}")
 
         if bad_fields:
             return {
@@ -237,70 +364,71 @@ def make_record_product(sink: ProductSink):
                         "type": "text",
                         "text": (
                             "record_product rejected — the following "
-                            "field(s) lack a real http(s) source_url: "
-                            + ", ".join(bad_fields)
-                            + ". Omit each listed field entirely (remove it "
-                            "from `specs`) and call record_product again — "
-                            "do not invent a URL (invariant 2: no source, "
-                            "no field)."
+                            "field(s) are missing or not admissible: "
+                            + "; ".join(bad_fields)
+                            + ". Omit an unfixable field entirely (invariant 3: no "
+                            "source, no field), or fetch the page and re-cite it "
+                            "if you only searched, then call record_product again."
                         ),
                     }
                 ],
                 "is_error": True,
             }
 
-        # 2. Derive EvidenceProfile deterministically — never accept a
-        #    model-supplied confidence (invariant 3; also structurally
-        #    unavailable per RECORD_PRODUCT_SCHEMA's additionalProperties).
-        evidence = _derive_evidence_profile(
-            specs,
-            independent_review_count=args["independent_review_count"],
-            has_methodology_backed_source=args["has_methodology_backed_source"],
+        # 5. pricing / availability. Availability deliberately minimal —
+        #    see module docstring.
+        try:
+            pricing = PricingModel(**pricing_raw)
+        except ValidationError as e:
+            return _rejection(f"pricing: {e}")
+
+        availability = Availability(
+            sold_in_region=args["availability"]["sold_in_region"],
+            regional_names=[],
+            ships_to_region=None,
+            ships_from=None,
+            ships_from_signal=None,
+            ships_from_confidence=0.0,  # never model-supplied; invariant 4
+            import_caveats=[],
         )
 
-        # 3. Construct and validate the full Product. This is also where a
-        #    bad price_source_url or empty cons surfaces — both already
-        #    enforced by Product's own validators (models.py); no need to
-        #    duplicate that logic here.
+        # 6. Draft Product with placeholder evidence, so
+        #    build_evidence_profile has something to derive from (§4.0d).
         try:
-            product = Product(
+            draft = Product(
                 name=args["name"],
                 brand=args["brand"],
                 generation=args["generation"],
-                price_usd=args["price_usd"],
-                price_source_url=args["price_source_url"],
-                price_observed_at=args["price_observed_at"],
+                role=args.get("role", "recommendation"),
+                cluster_key=args["cluster_key"],
+                cluster_rationale=args["cluster_rationale"],
+                strength_archetype=args["strength_archetype"],
+                pricing=pricing,
+                availability=availability,
                 specs=specs,
                 pros=args["pros"],
                 cons=args["cons"],
-                strength_archetype=args["strength_archetype"],
-                in_budget=args["in_budget"],
+                ownership_notes=ownership_notes,
                 review_sources=args["review_sources"],
-                evidence=evidence,
+                in_budget=args["in_budget"],
+                evidence=_PLACEHOLDER_EVIDENCE,
             )
         except ValidationError as e:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"record_product rejected: {e}. If this is "
-                            "about price_source_url, a product needs a "
-                            "real http(s) price source — re-fetch it or "
-                            "drop this candidate. If this is about cons, "
-                            "add at least one real drawback (invariant 4: "
-                            "every product needs at least one con)."
-                        ),
-                    }
-                ],
-                "is_error": True,
-            }
+            return _rejection(
+                f"{e}. If this is about cons, add at least one real drawback "
+                "(invariant 4: every product needs at least one con)."
+            )
+
+        # 7. Real EvidenceProfile, computed in Python — never model-supplied
+        #    (invariant 4). This is what makes independent_review_count and
+        #    has_methodology_backed_source safe to drop from the schema
+        #    entirely rather than accept-then-ignore.
+        evidence = build_evidence_profile(draft, survey)
+        product = draft.model_copy(update={"evidence": evidence})
 
         sink.add(product)
         return {
-            "content": [
-                {"type": "text", "text": f"Recorded {product.name}."}
-            ],
+            "content": [{"type": "text", "text": f"Recorded {product.name}."}],
             "structuredContent": {
                 "recorded": True,
                 "name": product.name,

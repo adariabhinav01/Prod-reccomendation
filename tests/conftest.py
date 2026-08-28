@@ -25,6 +25,7 @@ from product_scout.models import (
     TopicAnswer,
     Verdict,
 )
+from product_scout.phases.refine import RawTopicPrompt
 from product_scout.settings import (
     DisplaySettings,
     LocationSettings,
@@ -128,6 +129,15 @@ def make_topic_prompt(**overrides) -> TopicPrompt:
     )
     defaults.update(overrides)
     return TopicPrompt(**defaults)
+
+
+def make_raw_topic_prompt(**overrides) -> RawTopicPrompt:
+    defaults = dict(
+        topic=make_topic_prompt(),
+        satisfies_must_have=["dual"],
+    )
+    defaults.update(overrides)
+    return RawTopicPrompt(**defaults)
 
 
 def make_broader_category(**overrides) -> BroaderCategory:

@@ -1,7 +1,9 @@
 """Unit tests for tools/record_product.py — the `record_product` MCP tool
-(build order step 5). The explicit deliverable of this step: verify the
-`source_url` requirement actually holds, including under "pressure" (a
-placeholder like "N/A" standing in for a real citation).
+(build order step 8, rewritten against the current v7 schema). Covers the
+step's explicit deliverable — §4.3 ledger validation, the three named
+cases — plus the pre-existing invariants this tool has always enforced:
+no source/no field, every product needs a con, and confidence is never
+model-suppliable.
 """
 
 import asyncio
@@ -9,75 +11,249 @@ import asyncio
 import jsonschema
 import pytest
 
-from product_scout.models import compute_confidence
+from product_scout.confidence import compute_confidence
+from product_scout.hooks.ledger import FetchLedger
 from product_scout.tools.record_product import (
     RECORD_PRODUCT_SCHEMA,
     ListProductSink,
     make_record_product,
 )
+from tests.conftest import make_survey_report
+
+SPEC_URL = "https://example.com/spec-sheet"
+PRICE_URL = "https://example.com/product"
+REVIEW_URL = "https://example.com/review"
+OWNERSHIP_URL = "https://forum.example.com/thread/1"
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
+def make_ledger(*, fetched: list[str] = (), seen: list[str] = ()) -> FetchLedger:
+    ledger = FetchLedger()
+    for url in fetched:
+        ledger.record_fetch(url)
+    for url in seen:
+        ledger.record_seen(url)
+    return ledger
+
+
 def full_valid_args(**overrides) -> dict:
-    """A complete, valid record_product args dict. Tool-arg-dict shape —
-    distinct from conftest.py's pydantic-model factories, so it stays local
-    to this file."""
+    """A complete, valid record_product args dict against the current
+    schema. Tool-arg-dict shape — distinct from conftest.py's pydantic-
+    model factories, so it stays local to this file."""
     defaults = dict(
         name="Widget Pro",
         brand="Acme",
         generation="current",
-        price_usd=199.0,
-        price_source_url="https://example.com/product",
-        price_observed_at="2026-08-01T00:00:00+00:00",
+        cluster_key="mid-tier",
+        cluster_rationale="Dual-motor mid-tier desks under $300.",
+        strength_archetype="value",
+        pricing={
+            "model_type": "one_time",
+            "upfront_amount": 199.0,
+            "recurring_amount": None,
+            "recurring_period": None,
+            "recurring_required_for_core": False,
+            "total_cost_1yr": 199.0,
+            "price_currency": "USD",
+            "price_tax_inclusive": None,
+            "price_source_url": PRICE_URL,
+            "price_observed_at": "2026-08-01T00:00:00+00:00",
+        },
+        availability={"sold_in_region": True},
         specs={
             "weight": {
                 "value": "42 lb",
-                "source_url": "https://example.com/spec-sheet",
-                "source_tier": 1,
+                "source_url": SPEC_URL,
+                "source_type": "manufacturer",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
             }
         },
         pros=["sturdy"],
         cons=["expensive"],
-        strength_archetype="value",
+        ownership_notes=[],
+        review_sources=[REVIEW_URL],
         in_budget=True,
-        review_sources=["https://example.com/review"],
-        independent_review_count=2,
-        has_methodology_backed_source=True,
     )
     defaults.update(overrides)
     return defaults
 
 
-def call_record_product(sink, args):
-    tool_def = make_record_product(sink)
+def call_record_product(sink, ledger, args, *, survey=None):
+    tool_def = make_record_product(sink, survey or make_survey_report(), ledger)
     return run(tool_def.handler(args))
 
 
-# -- invariant 2: no source, no field -----------------------------------------
+def default_ledger() -> FetchLedger:
+    """A ledger admitting every URL `full_valid_args()` cites, at the mode
+    each field actually requires."""
+    return make_ledger(fetched=[SPEC_URL, PRICE_URL], seen=[REVIEW_URL])
 
 
-def test_spec_missing_source_url_entirely_rejected():
+# -- §4.3 case 1: a spec citing an unfetched URL is rejected -----------------
+
+
+def test_spec_citing_unfetched_url_is_rejected():
     sink = ListProductSink()
-    args = full_valid_args(
-        specs={"weight": {"value": "42 lb", "source_tier": 1}}
-    )
-    result = call_record_product(sink, args)
+    ledger = make_ledger(fetched=[PRICE_URL], seen=[REVIEW_URL])  # SPEC_URL absent
+    result = call_record_product(sink, ledger, full_valid_args())
     assert result["is_error"] is True
     assert "specs['weight']" in result["content"][0]["text"]
+    assert "§4.3" in result["content"][0]["text"]
     assert sink.products == []
+
+
+def test_price_citing_unfetched_url_is_rejected():
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[SPEC_URL], seen=[REVIEW_URL])  # PRICE_URL absent
+    result = call_record_product(sink, ledger, full_valid_args())
+    assert result["is_error"] is True
+    assert "pricing.price_source_url" in result["content"][0]["text"]
+    assert sink.products == []
+
+
+def test_spec_citing_a_url_only_seen_via_search_is_rejected():
+    """The URL is real and was actually observed by the run — just never
+    fetched. Still inadmissible for a spec value (§4.3's second sentence:
+    "A search snippet is not a page")."""
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[PRICE_URL], seen=[SPEC_URL, REVIEW_URL])
+    result = call_record_product(sink, ledger, full_valid_args())
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "specs['weight']" in text
+    assert "only seen in search results" in text
+    assert sink.products == []
+
+
+# -- §4.3 case 2: a redirect does not cause false rejection ------------------
+
+
+def test_spec_citing_the_post_redirect_url_is_accepted():
+    sink = ListProductSink()
+    landed_url = "https://cdn.example.com/spec-sheet-final"
+    ledger = FetchLedger()
+    ledger.record_fetch(SPEC_URL, redirected_to=landed_url)
+    ledger.record_fetch(PRICE_URL)
+    ledger.record_seen(REVIEW_URL)
+
+    args = full_valid_args()
+    args["specs"]["weight"]["source_url"] = landed_url  # cite the post-redirect URL
+
+    result = call_record_product(sink, ledger, args)
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+
+
+def test_spec_citing_the_pre_redirect_url_is_also_accepted():
+    """Both directions must work — citing whichever URL you actually
+    navigated to (pre- or post-redirect) is correct provenance."""
+    sink = ListProductSink()
+    ledger = FetchLedger()
+    ledger.record_fetch(SPEC_URL, redirected_to="https://cdn.example.com/spec-sheet-final")
+    ledger.record_fetch(PRICE_URL)
+    ledger.record_seen(REVIEW_URL)
+
+    result = call_record_product(sink, ledger, full_valid_args())  # cites SPEC_URL, pre-redirect
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+
+
+def test_redirect_with_query_string_and_trailing_slash_variance_still_admits():
+    """Combines the redirect allowance with §4.3's normalization rule —
+    citing a query-string/trailing-slash variant of the post-redirect URL
+    must not be falsely rejected either."""
+    sink = ListProductSink()
+    ledger = FetchLedger()
+    ledger.record_fetch(SPEC_URL, redirected_to="https://cdn.example.com/spec-sheet-final")
+    ledger.record_fetch(PRICE_URL)
+    ledger.record_seen(REVIEW_URL)
+
+    args = full_valid_args()
+    args["specs"]["weight"]["source_url"] = (
+        "https://cdn.example.com/spec-sheet-final/?ref=email"
+    )
+    result = call_record_product(sink, ledger, args)
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+
+
+# -- §4.3 case 3: seen_not_fetched admissible for judgment, not specs --------
+
+
+def test_ownership_note_citing_a_search_only_url_is_accepted():
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[SPEC_URL, PRICE_URL], seen=[OWNERSHIP_URL, REVIEW_URL])
+    args = full_valid_args(
+        ownership_notes=[
+            {
+                "value": "several owners report the arm loosens after a year",
+                "source_url": OWNERSHIP_URL,
+                "source_type": "community",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
+            }
+        ]
+    )
+    result = call_record_product(sink, ledger, args)
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+    assert sink.products[0].ownership_notes[0].source_url == OWNERSHIP_URL
+
+
+def test_ownership_note_citing_a_never_seen_url_is_still_rejected():
+    """seen_not_fetched being admissible for judgment doesn't mean
+    ANYTHING is admissible — a URL absent from the ledger entirely (never
+    fetched, never searched) still fails."""
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[SPEC_URL, PRICE_URL], seen=[REVIEW_URL])
+    args = full_valid_args(
+        ownership_notes=[
+            {
+                "value": "owners report longevity issues",
+                "source_url": "https://forum.example.com/thread/invented",
+                "source_type": "community",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
+            }
+        ]
+    )
+    result = call_record_product(sink, ledger, args)
+    assert result["is_error"] is True
+    assert "ownership_notes[0]" in result["content"][0]["text"]
+    assert sink.products == []
+
+
+def test_review_source_citing_a_search_only_url_is_accepted():
+    """review_sources are bare URLs (no SourcedValue wrapper) but are
+    judgment-bearing the same way ownership_notes are — either access mode
+    admissible."""
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[SPEC_URL, PRICE_URL], seen=[REVIEW_URL])
+    result = call_record_product(sink, ledger, full_valid_args())
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+
+
+# -- invariant 3: no source, no field (pre-existing, re-verified against the
+#    new schema) -------------------------------------------------------------
+
+
+def test_spec_missing_source_url_entirely_rejected_at_schema_layer():
+    args = full_valid_args()
+    del args["specs"]["weight"]["source_url"]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=args, schema=RECORD_PRODUCT_SCHEMA)
 
 
 def test_spec_empty_string_source_url_rejected():
     sink = ListProductSink()
-    args = full_valid_args(
-        specs={
-            "weight": {"value": "42 lb", "source_url": "", "source_tier": 1}
-        }
-    )
-    result = call_record_product(sink, args)
+    args = full_valid_args()
+    args["specs"]["weight"]["source_url"] = ""
+    result = call_record_product(sink, default_ledger(), args)
     assert result["is_error"] is True
     assert "specs['weight']" in result["content"][0]["text"]
     assert sink.products == []
@@ -87,16 +263,9 @@ def test_spec_na_placeholder_source_url_rejected():
     """The literal "pressure" case — a model rationalizing a placeholder
     instead of a real citation."""
     sink = ListProductSink()
-    args = full_valid_args(
-        specs={
-            "weight": {
-                "value": "42 lb",
-                "source_url": "N/A",
-                "source_tier": 1,
-            }
-        }
-    )
-    result = call_record_product(sink, args)
+    args = full_valid_args()
+    args["specs"]["weight"]["source_url"] = "N/A"
+    result = call_record_product(sink, default_ledger(), args)
     assert result["is_error"] is True
     assert "specs['weight']" in result["content"][0]["text"]
     assert sink.products == []
@@ -104,16 +273,9 @@ def test_spec_na_placeholder_source_url_rejected():
 
 def test_spec_non_http_scheme_source_url_rejected():
     sink = ListProductSink()
-    args = full_valid_args(
-        specs={
-            "weight": {
-                "value": "42 lb",
-                "source_url": "ftp://example.com/spec-sheet",
-                "source_tier": 1,
-            }
-        }
-    )
-    result = call_record_product(sink, args)
+    args = full_valid_args()
+    args["specs"]["weight"]["source_url"] = "ftp://example.com/spec-sheet"
+    result = call_record_product(sink, default_ledger(), args)
     assert result["is_error"] is True
     assert "specs['weight']" in result["content"][0]["text"]
     assert sink.products == []
@@ -123,15 +285,23 @@ def test_multiple_bad_specs_all_named_in_one_rejection():
     sink = ListProductSink()
     args = full_valid_args(
         specs={
-            "weight": {"value": "42 lb", "source_url": "", "source_tier": 1},
+            "weight": {
+                "value": "42 lb",
+                "source_url": "",
+                "source_type": "manufacturer",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
+            },
             "height": {
                 "value": "30 in",
                 "source_url": "N/A",
-                "source_tier": 2,
+                "source_type": "manufacturer",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
             },
         }
     )
-    result = call_record_product(sink, args)
+    result = call_record_product(sink, default_ledger(), args)
     assert result["is_error"] is True
     text = result["content"][0]["text"]
     assert "specs['weight']" in text
@@ -139,35 +309,26 @@ def test_multiple_bad_specs_all_named_in_one_rejection():
     assert sink.products == []
 
 
-def test_missing_price_source_url_rejected():
-    sink = ListProductSink()
-    args = full_valid_args(price_source_url="")
-    result = call_record_product(sink, args)
-    assert result["is_error"] is True
-    assert sink.products == []
-
-
-# -- invariant 4: every product needs at least one con ------------------------
+# -- invariant 6: every product needs at least one con ------------------------
 
 
 def test_empty_cons_rejected():
     sink = ListProductSink()
-    args = full_valid_args(cons=[])
-    result = call_record_product(sink, args)
+    result = call_record_product(sink, default_ledger(), full_valid_args(cons=[]))
     assert result["is_error"] is True
     assert sink.products == []
 
 
 def test_empty_cons_rejected_at_schema_layer_too():
-    """Enforced in validation at both layers — the wire-level jsonschema
-    check (minItems: 1) also rejects, not just the handler's pydantic
+    """Enforced at both layers — the wire-level jsonschema check
+    (minItems: 1) also rejects, not just the handler's pydantic
     construction."""
     args = full_valid_args(cons=[])
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=args, schema=RECORD_PRODUCT_SCHEMA)
 
 
-# -- invariant 3: confidence is computed, never model-assigned ----------------
+# -- invariant 4: confidence/evidence-derived fields are never model-suppliable --
 
 
 def test_confidence_field_rejected_at_schema_layer():
@@ -180,13 +341,31 @@ def test_confidence_field_rejected_at_schema_layer():
         jsonschema.validate(instance=args, schema=RECORD_PRODUCT_SCHEMA)
 
 
-# -- positive control ----------------------------------------------------------
+def test_independent_review_count_rejected_at_schema_layer():
+    """Unlike the pre-v7 version of this tool, the model no longer reports
+    this at all — build_evidence_profile derives it from review_sources."""
+    args = full_valid_args()
+    args["independent_review_count"] = 5
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=args, schema=RECORD_PRODUCT_SCHEMA)
+
+
+def test_ships_from_confidence_is_never_model_suppliable():
+    """§10.6 / invariant 4 names this field specifically alongside
+    confidence. It isn't even in the schema's availability object — the
+    handler always fills it in as 0.0 (§10.6's real derivation is build
+    order step 11)."""
+    assert "ships_from_confidence" not in RECORD_PRODUCT_SCHEMA["properties"]["availability"][
+        "properties"
+    ]
+
+
+# -- positive control + evidence wiring ---------------------------------------
 
 
 def test_valid_product_accepted():
     sink = ListProductSink()
-    args = full_valid_args()
-    result = call_record_product(sink, args)
+    result = call_record_product(sink, default_ledger(), full_valid_args())
     assert result.get("is_error") is not True
     assert len(sink.products) == 1
 
@@ -194,16 +373,24 @@ def test_valid_product_accepted():
     assert product.name == "Widget Pro"
     assert product.evidence.confidence == compute_confidence(product.evidence)
     assert product.evidence.confidence_note  # non-empty
+    assert product.evidence.independent_review_count == 1  # derived from review_sources
 
 
 def test_confidence_note_is_deterministic():
-    """Same args, called twice -> identical note text. Proves the note
-    isn't model-variance-dependent (there's no model in this test at all —
-    this pins the shape of determinism the handler itself guarantees)."""
+    """Same args, called twice -> identical note text. No model involved
+    in this test at all — pins the determinism the handler guarantees."""
     args = full_valid_args()
     sink_a, sink_b = ListProductSink(), ListProductSink()
-    call_record_product(sink_a, args)
-    call_record_product(sink_b, args)
+    call_record_product(sink_a, default_ledger(), args)
+    call_record_product(sink_b, default_ledger(), args)
     assert sink_a.products[0].evidence.confidence_note == (
         sink_b.products[0].evidence.confidence_note
     )
+
+
+def test_availability_defaults_are_never_model_supplied():
+    sink = ListProductSink()
+    call_record_product(sink, default_ledger(), full_valid_args())
+    availability = sink.products[0].availability
+    assert availability.ships_from_confidence == 0.0
+    assert availability.ships_from_signal is None

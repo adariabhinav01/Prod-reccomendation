@@ -88,6 +88,38 @@ didn't need it.
 build-order step ("12. Low-evidence and commodity modes") — `SurveyOutcome`
 doesn't set it. `low_evidence_mode` *is* in scope (§8.1a's interrupt
 produces it directly, exactly as `probe.py`'s `ProbeOutcome` did).
+
+### §4.3 ledger validation on `secondhand_risk_factors` (added post-step-8)
+
+Build order step 8 wired §4.3 ledger validation onto EXTRACTION's
+`record_product` but missed the other place `SourcedValue`s enter a run:
+`SurveyReport.secondhand_risk_factors`, which §4.3 itself names by name
+("SURVEY produces `SourcedValue`s (notably `secondhand_risk_factors`)
+largely from search rather than fetching") and which CLAUDE.md invariant 3
+names explicitly too ("judgment-bearing SURVEY values may cite
+`seen_not_fetched`"). A well-formed `source_url` on a risk factor was
+passing straight through with no ledger check at all — the exact
+presence-isn't-provenance gap §4.3 exists to close.
+
+`_validate_secondhand_risk_factors` below closes it, mirroring
+`_verify_exemplars`'s own shape exactly (drop what doesn't verify, log one
+caveat per drop, never fail the whole report). Unlike exemplar names
+(checked against the in-call `evidence_pool`), this checks against a
+`hooks.ledger.FetchLedger` — the run-scoped provenance ledger built at
+step 8 — with `require_fetched=False`, per §4.3's table: judgment-bearing
+values (risk factors are exactly that — warnings, not spec facts) accept
+either `fetched` or `seen_not_fetched`, never neither.
+
+`run_survey` and `Surveyor.survey()` both take `ledger: FetchLedger` as a
+required parameter for this — no default, matching
+`phases/extraction.py`'s `Extractor.extract()` precedent and
+`hooks/ledger.py`'s own "run-scoped, not phase-scoped" reasoning: a silent
+default would just relocate the gap rather than close it once an
+orchestrator exists to carry one ledger across phases. `SdkSurveyor.survey()`
+wires `hooks/ledger.py`'s `PostToolUse` hook into its own `query()`, exactly
+as `SdkExtractor.extract()` already does — so a live SURVEY run's own
+`WebSearch`/`WebFetch` calls populate the same ledger this validation
+checks against.
 """
 
 from __future__ import annotations
@@ -108,11 +140,13 @@ from claude_agent_sdk import (
 from pydantic import BaseModel
 
 from product_scout import config
+from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
 from product_scout.io.port import QuestionPort
 from product_scout.models import (
     BroaderCategory,
     Cluster,
     Location,
+    SourcedValue,
     SurveyReport,
 )
 from product_scout.skills import assert_skill_loaded
@@ -203,7 +237,9 @@ class RawSurvey(BaseModel):
 class Surveyor(Protocol):
     """Seam for Phase 1's actual research + clustering call."""
 
-    async def survey(self, product_type: str, location: Location) -> RawSurvey: ...
+    async def survey(
+        self, product_type: str, location: Location, ledger: FetchLedger
+    ) -> RawSurvey: ...
 
 
 def _verify_exemplars(
@@ -256,6 +292,40 @@ def _apply_exemplar_constraint(
     verified_clusters, caveats = _verify_exemplars(report.clusters, evidence_pool)
     if verified_clusters != report.clusters:
         report = report.model_copy(update={"clusters": verified_clusters})
+    return report, caveats
+
+
+def _validate_secondhand_risk_factors(
+    factors: list[SourcedValue], ledger: FetchLedger
+) -> tuple[list[SourcedValue], list[str]]:
+    """§4.3, applied to SURVEY's own output — see module docstring. A
+    factor survives only if the ledger has SOME record of its
+    `source_url`, fetched or merely seen (`require_fetched=False`: these
+    are judgment-bearing risk warnings, not spec facts). Unverified
+    entries are dropped — never silently kept — and a caveat is logged
+    per drop, mirroring `_verify_exemplars` exactly."""
+    kept: list[SourcedValue] = []
+    caveats: list[str] = []
+    for factor in factors:
+        if ledger.is_admissible(factor.source_url, require_fetched=False):
+            kept.append(factor)
+        else:
+            caveats.append(
+                f"Dropped a secondhand-risk-factor citing {factor.source_url!r} "
+                "— not found in this run's fetch/search ledger (§4.3); never "
+                "shown to the user."
+            )
+    return kept, caveats
+
+
+def _apply_ledger_constraint(
+    report: SurveyReport, ledger: FetchLedger
+) -> tuple[SurveyReport, list[str]]:
+    verified_factors, caveats = _validate_secondhand_risk_factors(
+        report.secondhand_risk_factors, ledger
+    )
+    if verified_factors != report.secondhand_risk_factors:
+        report = report.model_copy(update={"secondhand_risk_factors": verified_factors})
     return report, caveats
 
 
@@ -359,9 +429,11 @@ async def run_survey(
     location: Location,
     surveyor: Surveyor,
     port: QuestionPort,
+    ledger: FetchLedger,
 ) -> SurveyOutcome:
     """Run Phase 1 end to end: survey, verify exemplars (§8.1a constraint
-    1), gate on coverage, interrupt at most once (§8.2).
+    1), §4.3-validate secondhand_risk_factors against `ledger`, gate on
+    coverage, interrupt at most once (§8.2).
 
     A `rich`/`moderate` result proceeds immediately, no interrupt, no
     low-evidence mode. A `sparse`/`barren` result halts *before* REFINE/
@@ -383,11 +455,13 @@ async def run_survey(
     caveats: list[str] = []
 
     while True:
-        raw = await surveyor.survey(current_type, location)
+        raw = await surveyor.survey(current_type, location, ledger)
         report, verify_caveats = _apply_exemplar_constraint(
             raw.report, raw.evidence_pool
         )
         caveats.extend(verify_caveats)
+        report, ledger_caveats = _apply_ledger_constraint(report, ledger)
+        caveats.extend(ledger_caveats)
 
         if report.coverage in ("rich", "moderate"):
             return SurveyOutcome(
@@ -534,7 +608,9 @@ class SdkSurveyor:
     def __init__(self, model: str = config.MODEL_HAIKU) -> None:
         self._model = model
 
-    async def survey(self, product_type: str, location: Location) -> RawSurvey:
+    async def survey(
+        self, product_type: str, location: Location, ledger: FetchLedger
+    ) -> RawSurvey:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
         assert_skill_loaded(config.RESEARCH_PROTOCOL_SKILL)
@@ -550,6 +626,7 @@ class SdkSurveyor:
             allowed_tools=["WebSearch", "WebFetch"],
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
+            hooks={"PostToolUse": ledger_hook_matchers(ledger)},  # §4.3
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 
