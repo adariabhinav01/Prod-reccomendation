@@ -96,7 +96,13 @@ from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, qu
 from pydantic import BaseModel
 
 from product_scout import config
+from product_scout.hooks.budget import (
+    RunBudget,
+    cost_cap_post_tool_use_matchers,
+    cost_cap_pre_tool_use_matchers,
+)
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import TimingAssessment
 from product_scout.skills import assert_skill_loaded
 
@@ -137,6 +143,7 @@ class TimingResearcher(Protocol):
         product_names: list[str],
         ledger: FetchLedger,
         low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> TimingAssessment: ...
 
 
@@ -175,12 +182,15 @@ async def run_timing(
     product_names: list[str],
     ledger: FetchLedger,
     low_evidence_mode: bool,
+    budget: RunBudget,
     researcher: TimingResearcher,
 ) -> TimingOutcome:
     """Run Phase 4 end to end: research (one Haiku call), then enforce
     §6.5's basis discipline in Python. No gate, no interrupt, no re-prompt
     loop — see module docstring on why this phase doesn't have one."""
-    assessment = await researcher.research(product_type, product_names, ledger, low_evidence_mode)
+    assessment = await researcher.research(
+        product_type, product_names, ledger, low_evidence_mode, budget
+    )
     assessment, caveats = _enforce_basis_discipline(assessment)
     return TimingOutcome(timing=assessment, caveats=caveats)
 
@@ -234,6 +244,7 @@ class SdkTimingResearcher:
         product_names: list[str],
         ledger: FetchLedger,
         low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> TimingAssessment:
         # §3: fail loudly before spending anything if either skill isn't
         # there to be loaded.
@@ -252,7 +263,12 @@ class SdkTimingResearcher:
             allowed_tools=["WebSearch", "WebFetch"],
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
-            hooks={"PostToolUse": ledger_hook_matchers(ledger)},  # §4.3 population, not validation
+            hooks={
+                "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
+                + cost_cap_pre_tool_use_matchers(budget),
+                "PostToolUse": ledger_hook_matchers(ledger)  # §4.3 population, not validation
+                + cost_cap_post_tool_use_matchers(budget),
+            },
             skills=[config.RESEARCH_PROTOCOL_SKILL, config.MARKET_TIMING_SKILL],
         )
 

@@ -53,7 +53,13 @@ from typing import Protocol, runtime_checkable
 from claude_agent_sdk import ClaudeAgentOptions, query
 
 from product_scout import config
+from product_scout.hooks.budget import (
+    RunBudget,
+    cost_cap_post_tool_use_matchers,
+    cost_cap_pre_tool_use_matchers,
+)
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
 from product_scout.tools.record_product import ListProductSink
@@ -110,6 +116,7 @@ class Extractor(Protocol):
         ledger: FetchLedger,
         location: Location,
         low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> list[Product]: ...
 
 
@@ -120,6 +127,7 @@ async def run_extraction(
     ledger: FetchLedger,
     location: Location,
     low_evidence_mode: bool,
+    budget: RunBudget,
     extractor: Extractor,
 ) -> list[Product]:
     """Thin by design. Short-circuits to `[]` without calling the
@@ -135,12 +143,15 @@ async def run_extraction(
     threaded straight through to `build_scout_server`'s §10.3
     confirmed-cross-border gate. `low_evidence_mode` (build order step 12)
     is threaded the same way, to both the prompt and §14/§8.3's mode-gated
-    `record_product` checks.
+    `record_product` checks. `budget: RunBudget` (build order step 13) is
+    threaded the same way again — required, no default, so the orchestrator
+    can't accidentally hand this phase a fresh (i.e. reset) budget; see
+    `hooks/budget.py`'s module docstring.
     """
     if not candidates:
         return []
     return await extractor.extract(
-        product_type, candidates, survey, ledger, location, low_evidence_mode
+        product_type, candidates, survey, ledger, location, low_evidence_mode, budget
     )
 
 
@@ -166,6 +177,7 @@ class SdkExtractor:
         ledger: FetchLedger,
         location: Location,
         low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> list[Product]:
         # §3: "add a startup assertion that skills actually loaded — fail
         # loudly rather than silently running without the recommendation
@@ -188,7 +200,12 @@ class SdkExtractor:
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
             mcp_servers={"scout": scout_server},
-            hooks={"PostToolUse": ledger_hook_matchers(ledger)},  # §4.3
+            hooks={
+                "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
+                + cost_cap_pre_tool_use_matchers(budget),
+                "PostToolUse": ledger_hook_matchers(ledger)
+                + cost_cap_post_tool_use_matchers(budget),
+            },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 

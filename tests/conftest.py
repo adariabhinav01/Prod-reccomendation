@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from product_scout.confidence import compute_confidence
+from product_scout.hooks.budget import RunBudget
 from product_scout.io.port import AxisSpec, TopicPrompt
 from product_scout.models import (
     Availability,
@@ -53,6 +54,22 @@ def make_location(**overrides) -> Location:
     defaults = dict(country="US", currency="USD")
     defaults.update(overrides)
     return Location(**defaults)
+
+
+def make_run_budget(**overrides) -> RunBudget:
+    """`RunBudget` isn't a pydantic model (see `hooks/budget.py`'s module
+    docstring on why) — this factory accepts its two constructor args
+    (`max_fetches`/`max_searches`) plus the two usage counters as
+    post-construction overrides, so a test can build an already-tripped
+    budget in one call, e.g. `make_run_budget(fetches_used=120)`."""
+    fetches_used = overrides.pop("fetches_used", 0)
+    searches_used = overrides.pop("searches_used", 0)
+    defaults = dict(max_fetches=120, max_searches=40)
+    defaults.update(overrides)
+    budget = RunBudget(**defaults)
+    budget.fetches_used = fetches_used
+    budget.searches_used = searches_used
+    return budget
 
 
 def make_availability(**overrides) -> Availability:

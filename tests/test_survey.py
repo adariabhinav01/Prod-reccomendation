@@ -10,6 +10,7 @@ plain fixtures) are.
 
 import asyncio
 
+from product_scout.hooks.budget import RunBudget
 from product_scout.hooks.ledger import FetchLedger
 from product_scout.io.cli_port import CLIQuestionPort
 from product_scout.models import Location
@@ -26,6 +27,7 @@ from product_scout.phases.survey import (
 from tests.conftest import (
     make_broader_category,
     make_cluster,
+    make_run_budget,
     make_sourced_value,
     make_survey_report,
 )
@@ -68,7 +70,7 @@ class FakeSurveyor:
         self.calls: list[tuple[str, Location]] = []
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger
+        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
     ) -> RawSurvey:
         self.calls.append((product_type, location))
         return self._responses[product_type]
@@ -109,7 +111,7 @@ def test_rich_coverage_proceeds_without_interrupt():
     surveyor = FakeSurveyor({"widgets": make_raw(coverage="rich")})
     port, _ = make_port([])  # would raise StopIteration if the port were called
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is False
@@ -132,7 +134,7 @@ def test_moderate_coverage_proceeds_without_interrupt():
     )
     port, _ = make_port([])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is False
@@ -147,7 +149,7 @@ def test_location_passed_through_to_surveyor():
     port, _ = make_port([])
     location = make_location(country="DE", currency="EUR")
 
-    run(run_survey("widgets", location, surveyor, port, FetchLedger()))
+    run(run_survey("widgets", location, surveyor, port, FetchLedger(), make_run_budget()))
 
     assert surveyor.calls == [("widgets", location)]
 
@@ -169,7 +171,7 @@ def test_sparse_coverage_interrupts_and_user_can_stop():
     )
     port, printed = make_port([STOP_OPTION])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is False
     assert outcome.low_evidence_mode is False
@@ -192,7 +194,7 @@ def test_sparse_coverage_user_keeps_original_scope():
     )
     port, _ = make_port([KEEP_SCOPE_OPTION])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is True
@@ -216,7 +218,7 @@ def test_barren_coverage_user_broadens_to_a_rich_category():
     surveyor = FakeSurveyor({"vintage widgets": barren, "broader widgets": rich})
     port, _ = make_port(['Research "broader widgets" instead (rich coverage)'])
 
-    outcome = run(run_survey("vintage widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("vintage widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is False
@@ -235,7 +237,7 @@ def test_zero_suggested_categories_falls_back_to_yes_no_proceed():
     )
     port, printed = make_port(["yes"])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is True
@@ -250,7 +252,7 @@ def test_zero_suggested_categories_falls_back_to_yes_no_stop():
     )
     port, printed = make_port(["no"])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is False
     assert outcome.category_broadening_offered is True
@@ -263,7 +265,7 @@ def test_zero_suggested_categories_reprompts_on_garbage_input():
     )
     port, _ = make_port(["maybe", "yes"])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
 
@@ -291,7 +293,7 @@ def test_broadening_into_another_sparse_category_does_not_reinterrupt():
     # StopIteration would fail the test outright.
     port, printed = make_port(['Research "broader widgets" instead (moderate coverage)'])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert [c for c, _ in surveyor.calls] == ["widgets", "broader widgets"]
     assert outcome.proceed is True
@@ -315,7 +317,7 @@ def test_broadening_into_a_barren_category_also_does_not_reinterrupt():
     surveyor = FakeSurveyor({"widgets": sparse, "broader widgets": barren})
     port, _ = make_port(['Research "broader widgets" instead (rich coverage)'])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is True
@@ -334,7 +336,7 @@ def test_broadening_into_a_barren_category_with_zero_suggestions_does_not_reinte
     surveyor = FakeSurveyor({"widgets": sparse, "broader widgets": barren_dead_end})
     port, _ = make_port(['Research "broader widgets" instead (rich coverage)'])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.proceed is True
     assert outcome.low_evidence_mode is True
@@ -358,7 +360,7 @@ def test_duplicate_broader_category_names_are_deduped():
     )
     port, printed = make_port([STOP_OPTION])
 
-    run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     options = _menu_options(printed)
     # First occurrence wins the dedup (moderate), so its annotation survives.
@@ -441,7 +443,7 @@ def test_run_survey_propagates_repair_caveat_from_surveyor():
         {"widgets": make_raw(coverage="rich", caveats=["comparison_specs was missing ['x']"])}
     )
     port, _ = make_port([])
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
     assert "comparison_specs was missing ['x']" in outcome.caveats
 
 
@@ -512,7 +514,7 @@ def test_run_survey_strips_invented_exemplar_end_to_end():
     )
     port, _ = make_port([])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.survey.clusters[0].exemplar_products == []
     assert any("Invented Ghost Widget" in c for c in outcome.caveats)
@@ -596,7 +598,7 @@ def test_run_survey_drops_unverified_secondhand_risk_factor_end_to_end():
     )
     port, _ = make_port([])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger(), make_run_budget()))
 
     assert outcome.survey.secondhand_risk_factors == []
     assert any(UNSEEN_URL in c for c in outcome.caveats)
@@ -616,7 +618,7 @@ def test_run_survey_keeps_secondhand_risk_factor_seen_via_search():
     )
     port, _ = make_port([])
 
-    outcome = run(run_survey("widgets", make_location(), surveyor, port, ledger))
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, ledger, make_run_budget()))
 
     assert len(outcome.survey.secondhand_risk_factors) == 1
     assert outcome.survey.secondhand_risk_factors[0].source_url == SEARCHED_URL

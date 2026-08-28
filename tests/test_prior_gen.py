@@ -7,6 +7,7 @@ pass-through/short-circuit logic (against a fake) are.
 
 import asyncio
 
+from product_scout.hooks.budget import RunBudget
 from product_scout.hooks.ledger import FetchLedger
 from product_scout.phases.prior_gen import (
     PriorGenResearcher,
@@ -15,7 +16,7 @@ from product_scout.phases.prior_gen import (
     _admit_finding,
     run_prior_gen,
 )
-from tests.conftest import make_location, make_product, make_survey_report
+from tests.conftest import make_location, make_product, make_run_budget, make_survey_report
 
 SPEC_URL = "https://example.com/prior-spec-sheet"
 PRICE_URL = "https://example.com/prior-product"
@@ -105,8 +106,8 @@ class FakePriorGenResearcher:
         self._raw = raw
         self.calls: list[tuple] = []
 
-    async def research(self, seeds, ledger, low_evidence_mode) -> RawPriorGen:
-        self.calls.append((seeds, ledger, low_evidence_mode))
+    async def research(self, seeds, ledger, low_evidence_mode, budget) -> RawPriorGen:
+        self.calls.append((seeds, ledger, low_evidence_mode, budget))
         return self._raw
 
 
@@ -211,7 +212,13 @@ def test_run_prior_gen_short_circuits_on_no_current_gen_seeds():
 
     outcome = run(
         run_prior_gen(
-            [prior_seed], make_survey_report(), FetchLedger(), make_location(), False, researcher
+            [prior_seed],
+            make_survey_report(),
+            FetchLedger(),
+            make_location(),
+            False,
+            make_run_budget(),
+            researcher,
         )
     )
 
@@ -232,6 +239,7 @@ def test_run_prior_gen_filters_to_current_generation_seeds():
             FetchLedger(),
             make_location(),
             False,
+            make_run_budget(),
             researcher,
         )
     )
@@ -256,7 +264,13 @@ def test_run_prior_gen_end_to_end_mixed_findings():
 
     outcome = run(
         run_prior_gen(
-            [seed], make_survey_report(), default_ledger(), make_location(), False, researcher
+            [seed],
+            make_survey_report(),
+            default_ledger(),
+            make_location(),
+            False,
+            make_run_budget(),
+            researcher,
         )
     )
 
@@ -270,7 +284,13 @@ def test_run_prior_gen_threads_low_evidence_mode_to_researcher():
     researcher = FakePriorGenResearcher(RawPriorGen(findings=[]))
     run(
         run_prior_gen(
-            [seed], make_survey_report(), FetchLedger(), make_location(), True, researcher
+            [seed],
+            make_survey_report(),
+            FetchLedger(),
+            make_location(),
+            True,
+            make_run_budget(),
+            researcher,
         )
     )
     assert researcher.calls[0][2] is True
@@ -297,12 +317,16 @@ def test_run_prior_gen_threads_low_evidence_mode_to_admit_finding():
     researcher = FakePriorGenResearcher(RawPriorGen(findings=[finding]))
 
     standard_outcome = run(
-        run_prior_gen([seed], make_survey_report(), ledger, make_location(), False, researcher)
+        run_prior_gen(
+            [seed], make_survey_report(), ledger, make_location(), False, make_run_budget(), researcher
+        )
     )
     assert standard_outcome.products == []
     assert len(standard_outcome.caveats) == 1
 
     low_evidence_outcome = run(
-        run_prior_gen([seed], make_survey_report(), ledger, make_location(), True, researcher)
+        run_prior_gen(
+            [seed], make_survey_report(), ledger, make_location(), True, make_run_budget(), researcher
+        )
     )
     assert len(low_evidence_outcome.products) == 1

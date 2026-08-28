@@ -147,6 +147,18 @@ wires `hooks/ledger.py`'s `PostToolUse` hook into its own `query()`, exactly
 as `SdkExtractor.extract()` already does — so a live SURVEY run's own
 `WebSearch`/`WebFetch` calls populate the same ledger this validation
 checks against.
+
+### `budget: RunBudget` (build order step 13) — the same required-parameter
+### treatment, for the same reason
+
+§13's global cost cap needs one `RunBudget` shared across every phase's
+`query()`, or the cap resets per phase (see `hooks/budget.py`'s module
+docstring). `Surveyor.survey()`/`SdkSurveyor.survey()`/`run_survey()` all
+take `budget: RunBudget` required, no default, threaded straight into
+`SdkSurveyor`'s `ClaudeAgentOptions(hooks={"PreToolUse": [...]})` alongside
+the source guard — SURVEY's own call always runs the guard strict
+(`low_evidence_mode=False`; see `hooks/source_guard.py`'s module docstring
+on why that's correct here, not an oversight).
 """
 
 from __future__ import annotations
@@ -167,7 +179,13 @@ from claude_agent_sdk import (
 from pydantic import BaseModel
 
 from product_scout import config
+from product_scout.hooks.budget import (
+    RunBudget,
+    cost_cap_post_tool_use_matchers,
+    cost_cap_pre_tool_use_matchers,
+)
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.io.port import QuestionPort
 from product_scout.models import (
     BroaderCategory,
@@ -272,7 +290,7 @@ class Surveyor(Protocol):
     """Seam for Phase 1's actual research + clustering call."""
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger
+        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
     ) -> RawSurvey: ...
 
 
@@ -516,6 +534,7 @@ async def run_survey(
     surveyor: Surveyor,
     port: QuestionPort,
     ledger: FetchLedger,
+    budget: RunBudget,
 ) -> SurveyOutcome:
     """Run Phase 1 end to end: survey, verify exemplars (§8.1a constraint
     1), §4.3-validate secondhand_risk_factors against `ledger`, gate on
@@ -541,7 +560,7 @@ async def run_survey(
     caveats: list[str] = []
 
     while True:
-        raw = await surveyor.survey(current_type, location, ledger)
+        raw = await surveyor.survey(current_type, location, ledger, budget)
         caveats.extend(raw.caveats)  # e.g. _repair_comparison_specs (step 12)
         report, verify_caveats = _apply_exemplar_constraint(
             raw.report, raw.evidence_pool
@@ -696,7 +715,7 @@ class SdkSurveyor:
         self._model = model
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger
+        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
     ) -> RawSurvey:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
@@ -713,7 +732,15 @@ class SdkSurveyor:
             allowed_tools=["WebSearch", "WebFetch"],
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
-            hooks={"PostToolUse": ledger_hook_matchers(ledger)},  # §4.3
+            hooks={
+                # SURVEY decides low_evidence_mode; it can't be known yet
+                # for SURVEY's own call, so the source guard always runs
+                # strict here (§13 — see hooks/source_guard.py docstring).
+                "PreToolUse": source_guard_hook_matchers(False)
+                + cost_cap_pre_tool_use_matchers(budget),
+                "PostToolUse": ledger_hook_matchers(ledger)
+                + cost_cap_post_tool_use_matchers(budget),
+            },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 
