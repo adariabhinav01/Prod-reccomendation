@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from product_scout import config
 from product_scout.confidence import compute_confidence
 from product_scout.hooks.budget import RunBudget
 from product_scout.io.port import AxisSpec, TopicPrompt
@@ -325,7 +326,7 @@ def make_run_record(**overrides) -> RunRecord:
         ),
         scores=[make_scored()],
         caveats=[],
-        model_ids={"analysis": "claude-opus-4-5-20260101"},
+        model_ids={"haiku": config.MODEL_HAIKU, "opus": config.MODEL_OPUS},
         skill_hashes={},
         trusted_sources=[],
     )

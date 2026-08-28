@@ -22,6 +22,7 @@ from product_scout.phases.scoring import (
     _demote_for_row_cap,
     _find_issues,
     _is_round_number,
+    _parse_scoring_json,
     _reassign_role_for_location,
     _round_number_issue,
     _top_pick_score,
@@ -818,3 +819,30 @@ def test_run_scoring_applies_location_reassignment_before_row_cap_demotion():
     assert sum(1 for p in outcome.products if p.role == "recommendation") == ROW_CAP
     assert any("reference_unavailable" in c for c in outcome.caveats)
     assert not any("reference_displaced" in c for c in outcome.caveats)
+
+
+# -- _parse_scoring_json: proactive hardening against refine.py's confirmed
+# live failure mode (identical bare-query/raw-JSON-from-text architecture —
+# see scoring.py's own comment on _INVALID_APOSTROPHE_ESCAPE). -------------
+
+
+def test_parse_scoring_json_repairs_an_escaped_apostrophe():
+    raw = '{"scores": [{"product_name": "Widget", "rationale": "it\\\'s solid"}]}'
+    parsed = _parse_scoring_json(raw)
+    assert parsed is not None
+    assert parsed["scores"][0]["rationale"] == "it's solid"
+
+
+def test_parse_scoring_json_is_a_no_op_when_there_is_nothing_to_repair():
+    raw = '{"scores": [{"product_name": "Widget", "rationale": "fine"}]}'
+    parsed = _parse_scoring_json(raw)
+    assert parsed["scores"][0]["rationale"] == "fine"
+
+
+def test_parse_scoring_json_returns_none_on_genuinely_malformed_json():
+    assert _parse_scoring_json('{"scores": [') is None
+
+
+def test_parse_scoring_json_returns_none_on_empty_text():
+    assert _parse_scoring_json("") is None
+    assert _parse_scoring_json("   ") is None

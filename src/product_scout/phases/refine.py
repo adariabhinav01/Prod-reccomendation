@@ -74,6 +74,7 @@ copy about them, so this isn't extra judgment burden.
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol, runtime_checkable
 
 from claude_agent_sdk import (
@@ -82,7 +83,7 @@ from claude_agent_sdk import (
     TextBlock,
     query,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from product_scout import config
 from product_scout.io.port import (
@@ -377,7 +378,29 @@ async def run_refine(
 # this suite, consistent with SdkSurveyor/SdkDiscoverer/SdkExtractor).
 # ---------------------------------------------------------------------------
 
+# Found live (build order step 15's golden-set capture): scout-refiner's raw
+# JSON-array response is long enough (5-7 verbose topics, each with several
+# paragraph-length free-text fields) that Opus occasionally corrupts the
+# brace nesting partway through — not the same failure twice, so there's no
+# single mechanical repair to write (unlike `_INVALID_APOSTROPHE_ESCAPE`
+# below, which fixes one specific, deterministic mistake). A fresh,
+# independent sample is a different stochastic draw, so retrying the
+# unmodified query is the general fix — same "bounded retry, then fail
+# loudly" shape as `phases/scoring.py`'s `SCORING_REPROMPT_MAX`, just
+# without feedback text, since there's nothing content-specific to correct.
+REFINE_JSON_RETRY_MAX: int = 2
+
 _UNPARSED = object()
+
+# Found live, running this phase for real (build order step 15's golden-set
+# capture) — Opus sometimes backslash-escapes an apostrophe inside a JSON
+# string ("don\'t"), a Python/JS string-literal habit. JSON strings are
+# double-quoted, so an apostrophe never needs escaping in one, and `\'` isn't
+# a legal JSON escape at all — a single stray one anywhere makes the whole
+# array unparseable. Mechanical repair, not a re-prompt (same category as
+# survey.py's `_repair_comparison_specs` — there's nothing to ask the model
+# to reconsider). Unconditional and safe: text with no `\'` is unchanged.
+_INVALID_APOSTROPHE_ESCAPE = re.compile(r"\\'")
 
 
 def _try_json_loads(payload: str):
@@ -396,6 +419,7 @@ def _parse_topic_list_json(text: str) -> list | None:
     text = text.strip()
     if not text:
         return None
+    text = _INVALID_APOSTROPHE_ESCAPE.sub("'", text)
 
     parsed = _try_json_loads(text)
     if parsed is _UNPARSED:
@@ -407,6 +431,31 @@ def _parse_topic_list_json(text: str) -> list | None:
     if parsed is _UNPARSED or not isinstance(parsed, list):
         return None
     return parsed
+
+
+# `TopicPrompt`'s own `topic: str` field shares a name with the wrapping
+# `RawTopicPrompt.topic: TopicPrompt` field around it — found live (build
+# order step 15's golden-set capture, reproduced on independent samples,
+# including all 3 retries in one attempt, so this is a systematic
+# misreading of the schema, not stochastic noise a retry alone fixes):
+# Opus repeatedly flattens `TopicPrompt`'s six fields onto the
+# `RawTopicPrompt` level instead of nesting them under "topic". Every field
+# `RawTopicPrompt` actually needs is still present, just one level too
+# shallow — a mechanical repair (same category as `_INVALID_APOSTROPHE_ESCAPE`
+# and survey.py's `_repair_comparison_specs`), not a guess.
+_TOPIC_PROMPT_FIELDS = (
+    "topic", "dimension_name", "gate_question", "gate_description", "axis", "free_text_prompt",
+)
+
+
+def _repair_flattened_topic(item: dict) -> dict:
+    """If `item["topic"]` is a bare string, `TopicPrompt`'s fields were
+    flattened onto `item` — reconstruct the nested shape. A dict-valued
+    "topic" (the correct shape) passes through unchanged."""
+    if not isinstance(item.get("topic"), str):
+        return item
+    topic = {k: item.get(k) for k in _TOPIC_PROMPT_FIELDS}
+    return {"topic": topic, "satisfies_must_have": item.get("satisfies_must_have", [])}
 
 
 REFINE_PROMPT_TEMPLATE = """You are scout-refiner. SURVEY has already run \
@@ -493,20 +542,36 @@ class SdkRefiner:
         )
 
         final_text = ""
-        async for message in query(prompt=prompt, options=options):
-            if not isinstance(message, AssistantMessage):
-                continue
-            content = message.content
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, TextBlock):
-                    final_text = block.text  # keep overwriting; last wins
+        parsed = None
+        for _attempt in range(REFINE_JSON_RETRY_MAX + 1):  # first try + retries
+            final_text = ""
+            async for message in query(prompt=prompt, options=options):
+                if not isinstance(message, AssistantMessage):
+                    continue
+                content = message.content
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, TextBlock):
+                        final_text = block.text  # keep overwriting; last wins
 
-        parsed = _parse_topic_list_json(final_text)
-        if parsed is None:
-            raise RuntimeError(
-                "scout-refiner's final message did not contain a "
-                f"parseable JSON array of topics: {final_text!r}"
-            )
-        return [RawTopicPrompt(**item) for item in parsed]
+            parsed = _parse_topic_list_json(final_text)
+            if parsed is None:
+                continue
+            parsed = [_repair_flattened_topic(item) for item in parsed]
+            try:
+                # Validated inside the retry loop, not after it: a
+                # structurally valid JSON array that still doesn't match
+                # RawTopicPrompt's shape even after the flattening repair
+                # is just as much "the wrong response" as a parse failure,
+                # and a fresh sample is equally the right fix for either.
+                return [RawTopicPrompt(**item) for item in parsed]
+            except ValidationError:
+                parsed = None
+                continue
+
+        raise RuntimeError(
+            "scout-refiner's final message did not contain a parseable, "
+            f"schema-valid JSON array of topics after {REFINE_JSON_RETRY_MAX + 1} "
+            f"attempt(s): {final_text!r}"
+        )

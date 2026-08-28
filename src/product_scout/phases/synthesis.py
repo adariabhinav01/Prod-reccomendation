@@ -60,10 +60,11 @@ site instead of buried in this module.
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol, runtime_checkable
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from product_scout import config
 from product_scout.confidence import confidence_band
@@ -220,6 +221,20 @@ async def run_synthesis(
 # adapter in this codebase).
 # ---------------------------------------------------------------------------
 
+# refine.py's SdkRefiner uses this identical bare-query/raw-JSON-from-text
+# pattern and, run live for the first time (build order step 15's
+# golden-set capture), needed proactive fixes: Opus occasionally
+# backslash-escapes an apostrophe inside a JSON string (not a legal JSON
+# escape), and occasionally corrupts brace nesting in a long response.
+# Applied here pre-emptively — same architecture, same failure classes.
+# `RawSynthesis` is flat (no nested model field), so refine.py's third fix
+# (re-nesting a flattened same-named field) has no analogue here.
+_INVALID_APOSTROPHE_ESCAPE = re.compile(r"\\'")
+
+# Bounded retry, same shape as REFINE_JSON_RETRY_MAX/SCORING_JSON_RETRY_MAX:
+# a parse or schema failure gets a fresh, independent sample.
+SYNTHESIS_JSON_RETRY_MAX: int = 2
+
 _UNPARSED = object()
 
 
@@ -236,6 +251,7 @@ def _parse_synthesis_json(text: str) -> dict | None:
     text = text.strip()
     if not text:
         return None
+    text = _INVALID_APOSTROPHE_ESCAPE.sub("'", text)
 
     parsed = _try_json_loads(text)
     if parsed is _UNPARSED:
@@ -358,20 +374,30 @@ class SdkSynthesizer:
         )
 
         final_text = ""
-        async for message in query(prompt=prompt, options=options):
-            if not isinstance(message, AssistantMessage):
-                continue
-            content = message.content
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, TextBlock):
-                    final_text = block.text  # keep overwriting; last wins
+        parsed = None
+        for _attempt in range(SYNTHESIS_JSON_RETRY_MAX + 1):  # first try + retries
+            final_text = ""
+            async for message in query(prompt=prompt, options=options):
+                if not isinstance(message, AssistantMessage):
+                    continue
+                content = message.content
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, TextBlock):
+                        final_text = block.text  # keep overwriting; last wins
 
-        parsed = _parse_synthesis_json(final_text)
-        if parsed is None:
-            raise RuntimeError(
-                "scout-synthesizer's final message did not contain a "
-                f"parseable JSON object: {final_text!r}"
-            )
-        return RawSynthesis(**parsed)
+            parsed = _parse_synthesis_json(final_text)
+            if parsed is None:
+                continue
+            try:
+                return RawSynthesis(**parsed)
+            except ValidationError:
+                parsed = None
+                continue
+
+        raise RuntimeError(
+            "scout-synthesizer's final message did not contain a parseable, "
+            f"schema-valid JSON object after {SYNTHESIS_JSON_RETRY_MAX + 1} "
+            f"attempt(s): {final_text!r}"
+        )

@@ -90,6 +90,14 @@ def confidence_band(c: float) -> Literal["high", "moderate", "low", "very_low"]:
     return "very_low"
 
 
+def _flip_point_eligible_for_evidence(evidence: EvidenceProfile) -> bool:
+    """The actual two-clause predicate — extracted from `flip_point_eligible`
+    so `property_test_violations()` below can exercise it against a bare
+    `EvidenceProfile`, without needing to construct an entire `Product` just
+    to reach two field reads."""
+    return evidence.confidence >= FLIP_FLOOR and evidence.independent_review_count >= 2
+
+
 def flip_point_eligible(product: Product) -> bool:
     """§5.2's explicit two-clause predicate — NOT an emergent property of
     the confidence arithmetic.
@@ -106,10 +114,80 @@ def flip_point_eligible(product: Product) -> bool:
     Low-evidence mode suppresses flip points independent of this predicate
     (§5.2) — that rule is applied by the caller (Phase 6a), not here.
     """
-    return (
-        product.evidence.confidence >= FLIP_FLOOR
-        and product.evidence.independent_review_count >= 2
-    )
+    return _flip_point_eligible_for_evidence(product.evidence)
+
+
+def property_test_violations() -> list[str]:
+    """§4.1a's four property tests (docs/handoff.md §4.1a), as a reusable,
+    importable check — human-readable violation strings, empty when all
+    four hold. Exists so both `tests/test_confidence.py` (a single
+    integration test asserting this is `[]`, alongside the four original,
+    unchanged point-value/predicate tests) and `eval.py`'s golden-set
+    stable suite (§17.1 lists "the four §4.1a property tests" as one of
+    the STABLE, blocking rows — general properties of these functions, not
+    of any one golden case) exercise the identical logic, rather than
+    duplicating the four sweeps in two places.
+
+    Constructs `EvidenceProfile`s directly rather than importing
+    `tests/conftest.py`'s factories — this module is shipped package code;
+    `tests/` is not.
+    """
+    violations: list[str] = []
+
+    # 1. §5.2: a flip point always rests on >= 2 independent reviews. The
+    # best single-review profile computes to 0.631 — only 0.019 under
+    # FLIP_FLOOR — so this tests the PREDICATE, not the arithmetic margin.
+    for corr in (0.0, 1.0):  # 1.0 is reachable: mfr page + one review
+        e = EvidenceProfile(
+            source_count=2, independent_review_count=1, extracted_spec_count=1,
+            has_tier1_specs=True, has_methodology_backed_source=True,
+            corroboration_ratio=corr, conflict_ratio=0.0, recency_factor=1.0,
+            confidence=0.0, confidence_note="property-test",
+        )
+        e.confidence = compute_confidence(e)
+        if _flip_point_eligible_for_evidence(e):
+            violations.append(
+                f"single-review profile (corroboration_ratio={corr}) is flip-point eligible"
+            )
+
+    # 2. §4.1: total disagreement is a structural cap, not a margin.
+    for reviews in range(2, 21):
+        for corr in (0.0, 0.5, 1.0):
+            e = EvidenceProfile(
+                source_count=reviews, independent_review_count=reviews,
+                extracted_spec_count=1, has_tier1_specs=True,
+                has_methodology_backed_source=True, corroboration_ratio=corr,
+                conflict_ratio=1.0, recency_factor=1.0, confidence=0.0,
+                confidence_note="property-test",
+            )
+            confidence = compute_confidence(e)
+            if confidence >= FLIP_FLOOR:
+                violations.append(
+                    f"total-conflict profile (reviews={reviews}, corroboration_ratio={corr}) "
+                    f"reached confidence {confidence} >= FLIP_FLOOR"
+                )
+
+    # 3. Zero breadth is exactly zero confidence, whatever quality says.
+    for rec in (0.0, 0.5, 1.0):
+        e = EvidenceProfile(
+            source_count=0, independent_review_count=0, extracted_spec_count=0,
+            has_tier1_specs=False, has_methodology_backed_source=False,
+            corroboration_ratio=0.0, conflict_ratio=0.0, recency_factor=rec,
+            confidence=0.0, confidence_note="property-test",
+        )
+        confidence = compute_confidence(e)
+        if confidence != 0.0:
+            violations.append(
+                f"zero-breadth profile (recency_factor={rec}) computed nonzero confidence {confidence}"
+            )
+
+    # 4. §4.2: every representable confidence maps to exactly one band.
+    for i in range(1001):
+        value = round(i / 1000, 3)
+        if confidence_band(value) not in {"high", "moderate", "low", "very_low"}:
+            violations.append(f"confidence {value} did not tile into a known band")
+
+    return violations
 
 
 def build_evidence_profile(

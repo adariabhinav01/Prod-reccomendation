@@ -67,26 +67,37 @@ def format_price(pricing: PricingModel) -> str:
     """The headline price shown next to a product's name — §5.2: "Each
     product plots with name, price, and score." No ISO currency symbol
     guessing (e.g. assuming `$` for every currency) — the code, not a
-    locale table, so it's always correct rather than usually correct."""
+    locale table, so it's always correct rather than usually correct.
+
+    §16: a `rescore`-overridden price must stay honest in the report — the
+    number is user-asserted, not sourced. Every branch below funnels
+    through one `base` computation so the `" (user-set)"` suffix applies
+    wherever `price_overridden` is set, regardless of which branch produced
+    the string."""
     currency = pricing.price_currency
     if pricing.model_type == "subscription_only" and pricing.recurring_amount is not None:
         period = "mo" if pricing.recurring_period == "monthly" else "yr"
-        return f"{pricing.recurring_amount:,.2f} {currency}/{period}"
-    if pricing.model_type == "usage_based":
+        base = f"{pricing.recurring_amount:,.2f} {currency}/{period}"
+    elif pricing.model_type == "usage_based":
         if pricing.recurring_amount is not None:
-            return f"~{pricing.recurring_amount:,.2f} {currency} (usage-based)"
-        return "Usage-based pricing"
-    if pricing.model_type == "freemium":
+            base = f"~{pricing.recurring_amount:,.2f} {currency} (usage-based)"
+        else:
+            base = "Usage-based pricing"
+    elif pricing.model_type == "freemium":
         if pricing.upfront_amount is not None:
-            return f"{pricing.upfront_amount:,.2f} {currency} (paid tier)"
-        return "Free tier available"
-    if pricing.model_type == "one_time_plus_subscription" and pricing.total_cost_1yr is not None:
-        return f"{pricing.total_cost_1yr:,.2f} {currency} (1yr TCO)"
-    if pricing.upfront_amount is not None:
-        return f"{pricing.upfront_amount:,.2f} {currency}"
-    if pricing.total_cost_1yr is not None:
-        return f"{pricing.total_cost_1yr:,.2f} {currency} (1yr est.)"
-    return "Price not determined"
+            base = f"{pricing.upfront_amount:,.2f} {currency} (paid tier)"
+        else:
+            base = "Free tier available"
+    elif pricing.model_type == "one_time_plus_subscription" and pricing.total_cost_1yr is not None:
+        base = f"{pricing.total_cost_1yr:,.2f} {currency} (1yr TCO)"
+    elif pricing.upfront_amount is not None:
+        base = f"{pricing.upfront_amount:,.2f} {currency}"
+    elif pricing.total_cost_1yr is not None:
+        base = f"{pricing.total_cost_1yr:,.2f} {currency} (1yr est.)"
+    else:
+        return "Price not determined"
+
+    return f"{base} (user-set)" if pricing.price_overridden else base
 
 
 class ScaleRow(BaseModel):

@@ -25,15 +25,17 @@ from product_scout.io.cli_port import CLIQuestionPort
 from product_scout.phases.prior_gen import RawPriorGen
 from product_scout.phases.refine import RefineOutcome
 from product_scout.phases.scoring import RawProductScore, RawScoring
-from product_scout.phases.survey import RawSurvey
+from product_scout.phases.survey import RawSurvey, SurveyOutcome
 from product_scout.phases.synthesis import RawSynthesis
 from product_scout.render.report import render_html
+from product_scout.skills import hash_required_skills
 from product_scout.settings import Settings, LocationSettings, save as save_settings
 from product_scout.store.checkpoint import PHASE_NAMES
 from product_scout.store.runs import RunStore
 from tests.conftest import (
     make_cluster,
     make_intake_answers,
+    make_location,
     make_product,
     make_run_budget,
     make_settings,
@@ -277,6 +279,117 @@ def test_full_run_calls_every_phase_once_in_order_and_saves(tmp_path):
     assert record.verdict.action == "BUY"
     assert store.exists(record.run_id)
     assert store.report_path(record.run_id).exists()
+    assert record.skill_hashes == hash_required_skills(_REQUIRED_SKILLS)
+
+
+def test_full_run_reports_progress_for_every_phase_in_order(tmp_path):
+    """§16.2: 'the long research phases emit per-phase progress' — checked
+    here for all 9 phases, not just the research-heavy ones, since
+    `report_progress` is called uniformly at every phase boundary."""
+    port, printed = make_port(INTAKE_SCRIPT)
+    store = RunStore(root=tmp_path / ".product-scout")
+    fakes = _happy_fakes()
+
+    run(
+        run_pipeline(
+            "standing desks", port, store,
+            settings_path=settings_path_with_location(tmp_path), **fakes,
+        )
+    )
+
+    progress_lines = [line for line in printed if line]
+    expected = ["INTAKE", "SURVEY", "REFINE", "EXTRACTION", "TIMING", "PRIOR-GEN", "SCORING", "SYNTHESIS", "RENDER"]
+    # Each expected phase name must appear, in order (other lines — the
+    # actual intake questions — are interleaved and ignored here).
+    positions = [progress_lines.index(name) for name in expected]
+    assert positions == sorted(positions)
+
+
+# -- run_pipeline: §16.1 resume ------------------------------------------
+
+
+def test_resume_with_no_checkpoints_at_all_raises_file_not_found(tmp_path):
+    store = RunStore(root=tmp_path / ".product-scout")
+
+    def fail(_prompt):
+        raise AssertionError("resuming a run with nothing checkpointed must not ask anything")
+
+    port = CLIQuestionPort(input_fn=fail, print_fn=lambda line="": None)
+
+    with pytest.raises(FileNotFoundError):
+        run(run_pipeline("", port, store, resume_run_id="no-such-run", **_happy_fakes()))
+
+
+def test_resume_of_an_already_completed_run_returns_existing_record_without_recomputing(tmp_path):
+    port, _ = make_port(INTAKE_SCRIPT)
+    store = RunStore(root=tmp_path / ".product-scout")
+    fakes = _happy_fakes()
+
+    first = run(
+        run_pipeline(
+            "standing desks", port, store,
+            settings_path=settings_path_with_location(tmp_path), **fakes,
+        )
+    )
+
+    def fail(_prompt):
+        raise AssertionError("resuming a fully completed run must not ask anything")
+
+    resumed = run(
+        run_pipeline(
+            "", CLIQuestionPort(input_fn=fail, print_fn=lambda line="": None), store,
+            resume_run_id=first.run_id, **fakes,
+        )
+    )
+
+    assert resumed.run_id == first.run_id
+    assert resumed.verdict.action == first.verdict.action
+    # Nothing re-ran — every fake's call count is exactly what the first,
+    # real run already left it at.
+    assert len(fakes["surveyor"].calls) == 1
+    assert len(fakes["refiner"].calls) == 1
+    assert len(fakes["scorer"].calls) == 1
+    assert len(fakes["synthesizer"].calls) == 1
+
+
+def test_resume_skips_only_the_phases_already_checkpointed(tmp_path):
+    """Seeds `intake` and `survey` checkpoints by hand (simulating a crash
+    right after SURVEY) and resumes — SURVEY (and the port, for
+    INTAKE/SURVEY's own interaction) must never be touched again, while
+    REFINE onward runs normally."""
+    store = RunStore(root=tmp_path / ".product-scout")
+    run_id = "resume-test-0001"
+
+    intake = make_intake_answers()
+    location = make_location()
+    store.save_checkpoint(
+        run_id, "intake",
+        {"intake": intake.model_dump(mode="json"), "location": location.model_dump(mode="json"), "units": "imperial"},
+    )
+    survey_outcome = SurveyOutcome(
+        survey=make_survey_report(coverage="rich"),
+        proceed=True,
+        low_evidence_mode=False,
+        product_type="standing desks",
+        original_product_type=None,
+        category_broadening_offered=False,
+        caveats=[],
+    )
+    store.save_checkpoint(run_id, "survey", survey_outcome.model_dump(mode="json"))
+
+    fakes = _happy_fakes()
+    port, _ = make_port([])  # would raise StopIteration if intake/survey were re-asked anything
+
+    record = run(run_pipeline("", port, store, resume_run_id=run_id, **fakes))
+
+    assert record is not None
+    assert record.run_id == run_id
+    assert fakes["surveyor"].calls == []  # skipped — reused the seeded checkpoint
+    assert len(fakes["refiner"].calls) == 1  # ran fresh, past the resume point
+    assert len(fakes["scorer"].calls) == 1
+    assert len(fakes["synthesizer"].calls) == 1
+    assert record.verdict.action == "BUY"
+    assert store.exists(record.run_id)
 
 
 def test_extraction_candidates_are_the_surviving_clusters_exemplars(tmp_path):

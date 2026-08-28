@@ -98,7 +98,7 @@ from product_scout.degraded_modes import is_commodity_category, unresearched_clu
 from product_scout.hooks.budget import RunBudget
 from product_scout.hooks.ledger import FetchLedger
 from product_scout.io.port import QuestionPort
-from product_scout.models import Caveat, Product, RunRecord, TimingAssessment
+from product_scout.models import Caveat, IntakeAnswers, Location, Product, RunRecord, TimingAssessment
 from product_scout.phases.extraction import Extractor, SdkExtractor, run_extraction
 from product_scout.phases.intake import filter_by_required_features, run_intake
 from product_scout.phases.prior_gen import (
@@ -107,17 +107,18 @@ from product_scout.phases.prior_gen import (
     SdkPriorGenResearcher,
     run_prior_gen,
 )
-from product_scout.phases.refine import Refiner, SdkRefiner, run_refine
-from product_scout.phases.scoring import Scorer, SdkScorer, run_scoring
-from product_scout.phases.survey import Surveyor, SdkSurveyor, run_survey
-from product_scout.phases.synthesis import SdkSynthesizer, Synthesizer, run_synthesis
+from product_scout.phases.refine import RefineOutcome, Refiner, SdkRefiner, run_refine
+from product_scout.phases.scoring import ScoringOutcome, Scorer, SdkScorer, run_scoring
+from product_scout.phases.survey import SurveyOutcome, Surveyor, SdkSurveyor, run_survey
+from product_scout.phases.synthesis import SdkSynthesizer, SynthesisOutcome, Synthesizer, run_synthesis
 from product_scout.phases.timing import (
     SdkTimingResearcher,
     TimingOutcome,
     TimingResearcher,
     run_timing,
 )
-from product_scout.skills import assert_skill_loaded
+from product_scout.skills import assert_skill_loaded, hash_required_skills
+from product_scout.store import checkpoint as checkpoint_module
 from product_scout.store.checkpoint import PHASE_NAMES
 from product_scout.store.runs import RunStore, generate_run_id
 
@@ -161,6 +162,18 @@ def _mark_truncated(current: int | None, budget: RunBudget, phase_name: str) -> 
     if budget.tripped:
         return PHASE_NAMES.index(phase_name)
     return None
+
+
+def _load_if_resuming(run_store: RunStore, run_id: str, resume: bool, phase: str) -> dict | None:
+    """§16.1: `None` when not resuming, or when this phase hasn't
+    checkpointed yet — both mean "compute it fresh," the exact behavior
+    every phase already had before resume existed. Never confuse "not
+    resuming" with "phase 1 of 9" — a fresh (non-resumed) run always takes
+    this branch for every phase, so `resume=False` reproduces today's
+    behavior byte-for-byte."""
+    if not resume:
+        return None
+    return run_store.load_checkpoint(run_id, phase)
 
 
 def _extraction_candidates(survey, refine_outcome, intake) -> list[str]:
@@ -259,6 +272,7 @@ async def run_pipeline(
     run_store: RunStore,
     *,
     settings_path: Path | str | None = None,
+    resume_run_id: str | None = None,
     surveyor: Surveyor | None = None,
     refiner: Refiner | None = None,
     extractor: Extractor | None = None,
@@ -275,6 +289,18 @@ async def run_pipeline(
     `synthesizer` argument defaults to the real `Sdk<Phase>` adapter;
     `tests/test_orchestrator.py` injects fakes, mirroring every phase
     module's own test-double pattern.
+
+    `resume_run_id` (§16.1, build order step 15) picks up a partially
+    completed run: each phase below checks its own checkpoint first
+    (`_load_if_resuming`) and reconstructs that phase's outcome instead of
+    computing it fresh — skipping the live call, the checkpoint write, AND
+    the port interaction for INTAKE/SURVEY/REFINE. `resume_run_id=None`
+    (the default) makes every one of those checks a no-op, so a normal run
+    behaves exactly as before this parameter existed. `product_type` is
+    unused when resuming past INTAKE's own checkpoint — it's only needed
+    if INTAKE itself never checkpointed, which `run_id`'s own up-front
+    validation below refuses rather than silently re-asking INTAKE with
+    whatever (possibly empty) string the caller passed.
     """
     for skill in _REQUIRED_SKILLS:
         assert_skill_loaded(skill)
@@ -287,29 +313,55 @@ async def run_pipeline(
     scorer = scorer or SdkScorer()
     synthesizer = synthesizer or SdkSynthesizer()
 
-    run_id = generate_run_id()
+    resume = resume_run_id is not None
+    if resume:
+        run_id = resume_run_id
+        done = checkpoint_module.completed_phases(run_store.run_dir(run_id))
+        if not done:
+            raise FileNotFoundError(
+                f"No checkpoints found for run_id={run_id!r} — nothing to resume. "
+                "Start a fresh run instead."
+            )
+        if "render" in done:
+            # Already fully completed and saved — resuming it is a no-op.
+            return run_store.load(run_id)
+    else:
+        run_id = generate_run_id()
+
     ledger = FetchLedger()
     budget = RunBudget(max_fetches=config.MAX_RUN_FETCHES, max_searches=config.MAX_RUN_SEARCHES)
     truncated_at_phase: int | None = None
     raw_caveats: list[str] = []
 
     # -- 0. INTAKE (Python, no model call) -----------------------------------
-    intake, location, units = await run_intake(product_type, port, settings_path=settings_path)
-    run_store.save_checkpoint(
-        run_id,
-        "intake",
-        {
-            "intake": intake.model_dump(mode="json"),
-            "location": location.model_dump(mode="json"),
-            "units": units,
-        },
-    )
+    cached = _load_if_resuming(run_store, run_id, resume, "intake")
+    if cached is not None:
+        intake = IntakeAnswers.model_validate(cached["intake"])
+        location = Location.model_validate(cached["location"])
+        units = cached["units"]
+    else:
+        await port.report_progress("INTAKE")
+        intake, location, units = await run_intake(product_type, port, settings_path=settings_path)
+        run_store.save_checkpoint(
+            run_id,
+            "intake",
+            {
+                "intake": intake.model_dump(mode="json"),
+                "location": location.model_dump(mode="json"),
+                "units": units,
+            },
+        )
 
     # -- 1. SURVEY (Haiku) ----------------------------------------------------
-    survey_outcome = await run_survey(product_type, location, surveyor, port, ledger, budget)
-    run_store.save_checkpoint(run_id, "survey", survey_outcome.model_dump(mode="json"))
+    cached = _load_if_resuming(run_store, run_id, resume, "survey")
+    if cached is not None:
+        survey_outcome = SurveyOutcome.model_validate(cached)
+    else:
+        await port.report_progress("SURVEY")
+        survey_outcome = await run_survey(product_type, location, surveyor, port, ledger, budget)
+        run_store.save_checkpoint(run_id, "survey", survey_outcome.model_dump(mode="json"))
+        truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "survey")
     raw_caveats.extend(survey_outcome.caveats)
-    truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "survey")
 
     if not survey_outcome.proceed:
         # §8.2 user-declined stop — not a cost-cap event. Nothing to
@@ -319,79 +371,109 @@ async def run_pipeline(
     survey = survey_outcome.survey
 
     # -- 2. REFINE (Opus) — always runs; no tool calls, doesn't touch budget --
-    refine_outcome = await run_refine(survey, intake, refiner, port)
-    run_store.save_checkpoint(run_id, "refine", refine_outcome.model_dump(mode="json"))
+    cached = _load_if_resuming(run_store, run_id, resume, "refine")
+    if cached is not None:
+        refine_outcome = RefineOutcome.model_validate(cached)
+    else:
+        await port.report_progress("REFINE")
+        refine_outcome = await run_refine(survey, intake, refiner, port)
+        run_store.save_checkpoint(run_id, "refine", refine_outcome.model_dump(mode="json"))
     raw_caveats.extend(refine_outcome.caveats)
 
     # -- 3. EXTRACTION (Haiku) -------------------------------------------------
-    if budget.tripped:
-        products: list[Product] = []
-        raw_caveats.append(
-            "EXTRACTION skipped — this run's §13 cost cap was already reached "
-            "before this phase could run; no products were researched."
-        )
+    cached = _load_if_resuming(run_store, run_id, resume, "extraction")
+    if cached is not None:
+        products = [Product.model_validate(p) for p in cached["products"]]
     else:
-        candidates = _extraction_candidates(survey, refine_outcome, intake)
-        products = await run_extraction(
-            survey_outcome.product_type, candidates, survey, ledger, location,
-            survey_outcome.low_evidence_mode, budget, extractor,
-        )
-        products = filter_by_required_features(products, intake.required_features)
-    extraction_checkpoint = {"products": [p.model_dump(mode="json") for p in products]}
-    run_store.save_checkpoint(run_id, "extraction", extraction_checkpoint)
-    truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "extraction")
+        await port.report_progress("EXTRACTION")
+        if budget.tripped:
+            products = []
+            raw_caveats.append(
+                "EXTRACTION skipped — this run's §13 cost cap was already reached "
+                "before this phase could run; no products were researched."
+            )
+        else:
+            candidates = _extraction_candidates(survey, refine_outcome, intake)
+            products = await run_extraction(
+                survey_outcome.product_type, candidates, survey, ledger, location,
+                survey_outcome.low_evidence_mode, budget, extractor,
+            )
+            products = filter_by_required_features(products, intake.required_features)
+        extraction_checkpoint = {"products": [p.model_dump(mode="json") for p in products]}
+        run_store.save_checkpoint(run_id, "extraction", extraction_checkpoint)
+        truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "extraction")
 
     # -- 4. TIMING (Haiku) ------------------------------------------------------
-    if budget.tripped:
-        timing_outcome = TimingOutcome(
-            timing=_SKIPPED_TIMING,
-            caveats=[
-                "TIMING skipped — this run's §13 cost cap was already reached "
-                "before this phase could run."
-            ],
-        )
+    cached = _load_if_resuming(run_store, run_id, resume, "timing")
+    if cached is not None:
+        timing_outcome = TimingOutcome.model_validate(cached)
     else:
-        timing_outcome = await run_timing(
-            survey_outcome.product_type, [p.name for p in products], ledger,
-            survey_outcome.low_evidence_mode, budget, timing_researcher,
-        )
-    run_store.save_checkpoint(run_id, "timing", timing_outcome.model_dump(mode="json"))
+        await port.report_progress("TIMING")
+        if budget.tripped:
+            timing_outcome = TimingOutcome(
+                timing=_SKIPPED_TIMING,
+                caveats=[
+                    "TIMING skipped — this run's §13 cost cap was already reached "
+                    "before this phase could run."
+                ],
+            )
+        else:
+            timing_outcome = await run_timing(
+                survey_outcome.product_type, [p.name for p in products], ledger,
+                survey_outcome.low_evidence_mode, budget, timing_researcher,
+            )
+        run_store.save_checkpoint(run_id, "timing", timing_outcome.model_dump(mode="json"))
+        truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "timing")
     raw_caveats.extend(timing_outcome.caveats)
-    truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "timing")
 
     # -- 5. PRIOR-GEN (Haiku) -----------------------------------------------------
-    if budget.tripped:
-        prior_gen_outcome = PriorGenOutcome(
-            products=[],
-            caveats=[
-                "PRIOR-GEN skipped — this run's §13 cost cap was already "
-                "reached before this phase could run."
-            ],
-        )
+    cached = _load_if_resuming(run_store, run_id, resume, "prior_gen")
+    if cached is not None:
+        prior_gen_outcome = PriorGenOutcome.model_validate(cached)
     else:
-        prior_gen_outcome = await run_prior_gen(
-            products, survey, ledger, location, survey_outcome.low_evidence_mode,
-            budget, prior_gen_researcher,
-        )
-    run_store.save_checkpoint(run_id, "prior_gen", prior_gen_outcome.model_dump(mode="json"))
+        await port.report_progress("PRIOR-GEN")
+        if budget.tripped:
+            prior_gen_outcome = PriorGenOutcome(
+                products=[],
+                caveats=[
+                    "PRIOR-GEN skipped — this run's §13 cost cap was already "
+                    "reached before this phase could run."
+                ],
+            )
+        else:
+            prior_gen_outcome = await run_prior_gen(
+                products, survey, ledger, location, survey_outcome.low_evidence_mode,
+                budget, prior_gen_researcher,
+            )
+        run_store.save_checkpoint(run_id, "prior_gen", prior_gen_outcome.model_dump(mode="json"))
+        truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "prior_gen")
     raw_caveats.extend(prior_gen_outcome.caveats)
-    truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "prior_gen")
 
     products = [*products, *prior_gen_outcome.products]
 
     # -- 6a. SCORING (Opus) — always runs, on whatever `products` resulted ------
-    scoring_outcome = await run_scoring(
-        products, survey, intake, refine_outcome.topics, survey_outcome.low_evidence_mode, scorer
-    )
-    run_store.save_checkpoint(run_id, "scoring", scoring_outcome.model_dump(mode="json"))
+    cached = _load_if_resuming(run_store, run_id, resume, "scoring")
+    if cached is not None:
+        scoring_outcome = ScoringOutcome.model_validate(cached)
+    else:
+        await port.report_progress("SCORING")
+        scoring_outcome = await run_scoring(
+            products, survey, intake, refine_outcome.topics, survey_outcome.low_evidence_mode, scorer
+        )
+        run_store.save_checkpoint(run_id, "scoring", scoring_outcome.model_dump(mode="json"))
     raw_caveats.extend(scoring_outcome.caveats)
 
     # -- 6b. SYNTHESIS (Opus) — always runs ------------------------------------
-    synthesis_outcome = await run_synthesis(
-        scoring_outcome.products, scoring_outcome.scores, survey, intake,
-        timing_outcome.timing, survey_outcome.low_evidence_mode, synthesizer,
-    )
-    run_store.save_checkpoint(run_id, "synthesis", synthesis_outcome.model_dump(mode="json"))
+    cached = _load_if_resuming(run_store, run_id, resume, "synthesis")
+    if cached is not None:
+        synthesis_outcome = SynthesisOutcome.model_validate(cached)
+    else:
+        await port.report_progress("SYNTHESIS")
+        synthesis_outcome = await run_synthesis(
+            scoring_outcome.products, scoring_outcome.scores, survey, intake,
+            timing_outcome.timing, survey_outcome.low_evidence_mode, synthesizer,
+        )
+        run_store.save_checkpoint(run_id, "synthesis", synthesis_outcome.model_dump(mode="json"))
     raw_caveats.extend(synthesis_outcome.caveats)
 
     # -- assemble ---------------------------------------------------------------
@@ -419,10 +501,11 @@ async def run_pipeline(
         scores=synthesis_outcome.scores,
         caveats=caveats,
         model_ids={"haiku": config.MODEL_HAIKU, "opus": config.MODEL_OPUS},
-        skill_hashes={},  # §16 seam — unbuilt; matches trusted_sources' precedent
+        skill_hashes=hash_required_skills(_REQUIRED_SKILLS),
     )
 
     # -- 7. RENDER (Python, no model call) ---------------------------------------
+    await port.report_progress("RENDER")
     run_store.save(record)
     run_store.save_report(record)
     run_store.save_checkpoint(run_id, "render", {"run_id": run_id})

@@ -11,6 +11,7 @@ from product_scout.phases.synthesis import (
     RawSynthesis,
     Synthesizer,
     _apply_top_pick_rationales,
+    _parse_synthesis_json,
     _select_top_picks,
     run_synthesis,
 )
@@ -192,3 +193,31 @@ def test_run_synthesis_logs_caveat_for_missing_top_pick_rationale():
     assert any("Widget Pro" in c for c in outcome.caveats)
     # Falls back to the Phase 6a rationale rather than dropping it.
     assert outcome.scores[0].rationale == "short"
+
+
+# -- _parse_synthesis_json: proactive hardening against refine.py's
+# confirmed live failure mode (identical bare-query/raw-JSON-from-text
+# architecture — see synthesis.py's own comment on
+# _INVALID_APOSTROPHE_ESCAPE). -----------------------------------------
+
+
+def test_parse_synthesis_json_repairs_an_escaped_apostrophe():
+    raw = '{"verdict_action": "BUY", "verdict_reasoning": "it\\\'s a good fit", "verdict_timing_note": null}'
+    parsed = _parse_synthesis_json(raw)
+    assert parsed is not None
+    assert parsed["verdict_reasoning"] == "it's a good fit"
+
+
+def test_parse_synthesis_json_is_a_no_op_when_there_is_nothing_to_repair():
+    raw = '{"verdict_action": "BUY", "verdict_reasoning": "fine", "verdict_timing_note": null}'
+    parsed = _parse_synthesis_json(raw)
+    assert parsed["verdict_reasoning"] == "fine"
+
+
+def test_parse_synthesis_json_returns_none_on_genuinely_malformed_json():
+    assert _parse_synthesis_json('{"verdict_action": "BUY"') is None
+
+
+def test_parse_synthesis_json_returns_none_on_empty_text():
+    assert _parse_synthesis_json("") is None
+    assert _parse_synthesis_json("   ") is None

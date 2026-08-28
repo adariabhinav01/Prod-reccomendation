@@ -17,6 +17,8 @@ with no network or API key involved.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable
 from pathlib import Path
 
 # src/product_scout/skills.py -> product_scout -> src -> repo root
@@ -38,3 +40,26 @@ def assert_skill_loaded(skill_name: str, repo_root: Path | None = None) -> None:
             "tiering, extraction rules, low-evidence rules). Per §3: fail "
             "loudly rather than silently running degraded."
         )
+
+
+def hash_skill(skill_name: str, repo_root: Path | None = None) -> str:
+    """Return the hex SHA-256 digest of `.claude/skills/<skill_name>/SKILL.md`'s
+    raw bytes — populates `RunRecord.skill_hashes` (§16), which `rescore`
+    later compares against to warn when a skill's content has drifted since
+    the run. Raises the same `RuntimeError` as `assert_skill_loaded` if the
+    skill isn't present — a hash can't be computed for a file that doesn't
+    exist, and silently omitting it would make `skill_hashes` quietly
+    incomplete rather than failing loudly, which is exactly what §3 already
+    decided against for this same file."""
+    assert_skill_loaded(skill_name, repo_root)
+    root = repo_root if repo_root is not None else _REPO_ROOT
+    skill_path = root / ".claude" / "skills" / skill_name / "SKILL.md"
+    return hashlib.sha256(skill_path.read_bytes()).hexdigest()
+
+
+def hash_required_skills(
+    skill_names: Iterable[str], repo_root: Path | None = None
+) -> dict[str, str]:
+    """`{skill_name: hash_skill(skill_name)}` for every name in
+    `skill_names`. Used to populate `RunRecord.skill_hashes` (§16)."""
+    return {name: hash_skill(name, repo_root) for name in skill_names}

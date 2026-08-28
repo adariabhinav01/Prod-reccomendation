@@ -13,6 +13,7 @@ from product_scout.confidence import (
     compute_confidence,
     confidence_band,
     flip_point_eligible,
+    property_test_violations,
 )
 from product_scout.models import EvidenceProfile
 from tests.conftest import NOW, make_product, make_sourced_value, make_survey_report
@@ -209,6 +210,14 @@ def test_bands_tile():
     """Every representable confidence maps to exactly one band."""
     for i in range(1001):
         assert confidence_band(round(i / 1000, 3)) in {"high", "moderate", "low", "very_low"}
+
+
+def test_property_test_violations_is_empty():
+    """`property_test_violations()` is the same four sweeps above, extracted
+    into a reusable function §17.1's golden set also calls (build order
+    step 15) — this pins that it agrees with the four tests it was
+    refactored out of."""
+    assert property_test_violations() == []
 
 
 # -- §4.2 display bands --------------------------------------------------------

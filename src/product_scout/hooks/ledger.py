@@ -209,6 +209,15 @@ class FetchLedger:
             return None
         return self._entries.get(normalize_url(url))
 
+    def all_entries(self) -> dict[str, LedgerEntry]:
+        """Every URL this run has fetched or seen, keyed by its normalized
+        form, with its full `LedgerEntry`. Read-only view (returns a copy)
+        — added for `eval.py`'s `capture_case` (build order step 15),
+        which needs to serialize a completed run's ledger into a golden
+        case's frozen fixtures; no other caller needs to enumerate the
+        whole ledger, so this stayed unbuilt until now."""
+        return dict(self._entries)
+
     def is_admissible(self, url: str, *, require_fetched: bool) -> bool:
         """§4.3's admissibility rule. `require_fetched=True` for spec
         values and price (facts, never judgment); `False` for judgment-
