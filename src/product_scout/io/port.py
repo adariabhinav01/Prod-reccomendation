@@ -1,93 +1,119 @@
-"""QuestionPort protocol — the swappability seam (spec docs/handoff.md §3,
+"""QuestionPort protocol — the swappability seam (spec docs/handoff.md §3.4,
 build order step 2).
 
-"Terminal CLI now, web later — question-asking and rendering must sit
-behind swappable interfaces" (§0). Phase code, and later the `ask_user`
-SDK tool (§3), depend only on this Protocol. `cli_port.py` is the terminal
-implementation built now; `web_port.py` is the HTTP implementation stubbed
-for later. "Building web_port.py later means implementing QuestionPort
-against HTTP and swapping the injection. No phase code changes." (§3)
+"Terminal CLI now, web later — all interaction behind QuestionPort" (§0).
+Phase code (REFINE, step 7) depends only on this Protocol; `cli_port.py` is
+the terminal implementation built now, `web_port.py` the HTTP implementation
+stubbed for later. Invariant 9: "All user interaction routes through
+QuestionPort. No phase calls terminal input directly."
 
-### The two-attempt escape-hatch swap (§9)
+### Three primitives, three different jobs
 
-The "not sure" loop is a state machine, but the *port* holds none of its
-state — §9 is explicit that "the port owns which hatch is rendered, and no
-phase code needs to track attempt state." Concretely:
+`ask_choice` — a bare categorical question, N options plus one caller-supplied
+escape hatch string. Used for the §9.6 two-attempt "not sure" loop.
 
-- Attempt 1: phase code calls `ask(..., escape_hatch="not_sure")`. The port
-  appends "Not sure — explain what this changes" as an extra choice.
-- If the user picks it, phase code gets Opus to generate a
-  candidate-grounded explanation (§9), then calls `ask()` again for the
-  SAME question with `escape_hatch="no_preference"`. The port now appends
-  "No preference — pick a sensible default for me" instead — "not sure" is
-  never offered a second time.
-- If the user picks that, phase code records `no_preference` and applies
-  the safer default.
+`ask_topic` — the composed §9.1 two-stage question (gate, then optional axis
++ always-present free text), taking a `TopicPrompt` and returning one
+`TopicAnswer`. This is REFINE's main loop primitive.
 
-The loop is bounded by *which hatch value the caller passes*, not by a
-counter either side maintains — the `escape_hatch` argument to `ask()` IS
-the attempt state. Phase code (phases/refine.py, step 6) still has to make
-two calls with two different `escape_hatch` values, but it never needs its
-own `attempt = 1; attempt += 1` bookkeeping to know which hatch to offer.
+`offer_bailout` — "skip the rest and use your best judgment" (§9.7a).
 
-### Free text (`ask_text`)
+### The two-attempt escape-hatch swap lives in the CALLER, not the port (§9.6)
 
-`ask()` is strictly 2-4 fixed options — that's the shape the `ask_user` SDK
-tool (§3) exposes to models, and it's the right shape for the §9 loop. But
-some questions have no fixed option set at all: a dollar amount, a list of
-required features, a list of named candidate products (§7, Phase 0 intake).
-`ask_text` covers those — free-form input, no options, no escape hatch (the
-§9 loop is Phase 6/7-specific; Phase 0's fixed questions use `ask(...,
-escape_hatch="none")` and `ask_text` for exactly this reason). It returns
-the raw (stripped) string, including the empty string for a legitimately
-optional answer (e.g. "no required features") — the caller decides what an
-empty answer means, the port doesn't guess.
+`ask_choice`'s `escape_hatch` parameter is a raw string, not an enum with
+built-in attempt tracking. The port is stateless per call: given the same
+`question`/`options` twice with two different `escape_hatch` strings, it
+renders two independent menus and returns whichever string (from `options`
+or the literal `escape_hatch` argument) was picked each time. §9.6's
+mechanics —
+
+    attempt 1: escape_hatch = "Not sure — explain what this changes"
+    (if picked) Opus explains, grounded in the actual candidates
+    attempt 2: escape_hatch = "No preference — pick a sensible default"
+    ("Not sure" is never offered a second time)
+
+— are REFINE's (phases/refine.py, step 7) responsibility: call `ask_choice`
+once, inspect whether the returned string equals the hatch it passed in, and
+if so call Opus for the grounded explanation before calling `ask_choice`
+again with the swapped hatch. The port never counts attempts; "the bound
+lives in the UI [i.e. which hatch is offered], not a counter the model could
+argue around" (§9.6). `ESCAPE_HATCH_LABELS` below is quoted verbatim from
+§9.6's two exact hatch strings, so callers building the two-attempt loop
+don't have to re-type them (and risk a caller/port copy mismatch that would
+break the `answer == escape_hatch` comparison callers rely on).
+
+### ask_topic's gate labels are the port's, not the caller's
+
+Unlike `gate_question`/`gate_description` (topic-specific, authored by Opus
+in `TopicPrompt`), the four `GateAnswer` values are a fixed vocabulary (§9.1)
+— the same four choices for every topic. `GATE_ANSWER_LABELS` below is this
+module's own display copy for them; §9 never quotes exact wording for the
+gate menu the way it does for the two escape hatches, so this text is a
+reasonable choice, not a spec transcription — flagged here rather than
+presented as verbatim spec text.
 """
 
 from __future__ import annotations
 
 from typing import Literal, Protocol, runtime_checkable
 
-EscapeHatch = Literal["not_sure", "no_preference", "none"]
+from pydantic import BaseModel
 
-# Display label for each hatch, owned entirely by the port (never by phase
-# code — see module docstring). Keyed only by the two hatches that actually
-# render a choice; "none" renders nothing.
-ESCAPE_HATCH_LABELS: dict[Literal["not_sure", "no_preference"], str] = {
-    "not_sure": "Not sure — explain what this changes",
-    "no_preference": "No preference — pick a sensible default for me",
+from product_scout.models import GateAnswer, TopicAnswer
+
+# §9.6, quoted verbatim — the only two hatches ask_choice's §9.6 loop uses.
+# ask_choice itself accepts any string as escape_hatch (a bare gate question
+# in Phase 0, "none"-style callers, etc. may use different copy entirely) —
+# these two constants exist so REFINE's two-attempt loop (and this port's
+# own tests) share one spelling instead of each re-typing it.
+ESCAPE_HATCH_NOT_SURE: str = "Not sure — explain what this changes"
+ESCAPE_HATCH_NO_PREFERENCE: str = "No preference — pick a sensible default"
+
+# §9.1's fixed gate vocabulary — see module docstring on why this text lives
+# here rather than being spec-quoted.
+GATE_ANSWER_LABELS: dict[GateAnswer, str] = {
+    "must_have": "Must-have — exclude anything without it",
+    "must_avoid": "Must-avoid — exclude anything with it",
+    "persuadable": "Leaning one way, but open to a strong option changing my mind",
+    "no_preference": "No preference either way",
 }
+
+# §9.6 — asymmetric skip defaults. Position: genuinely balanced. Importance:
+# low weight, never invented from silence. See confidence.py's module-level
+# docstring convention: constants that encode a spec-mandated number get a
+# named home rather than being inlined, so a future reader can find *why*.
+POSITION_SKIP_DEFAULT: float = 0.5
+IMPORTANCE_SKIP_DEFAULT: float = 0.2
+
+
+class AxisSpec(BaseModel):
+    kind: Literal["position", "importance"]  # from Dimension.axis_kind; §9.4
+    low_label: str  # position: the opposing pole; importance: usually "doesn't matter"
+    high_label: str  # position: the other pole; importance: the dimension itself
+    why_this_matters: str  # one sentence, grounded in clusters
+
+
+class TopicPrompt(BaseModel):
+    topic: str
+    dimension_name: str | None  # None = free-text-only; §9.7
+    gate_question: str
+    gate_description: str  # what "must have"/"must avoid" mean here
+    axis: AxisSpec | None  # None when no coherent axis exists
+    free_text_prompt: str  # ALWAYS present; §9.3
 
 
 @runtime_checkable
 class QuestionPort(Protocol):
-    """§3's exact interface.
+    """§3.4's exact interface.
 
-    Implementations must:
-
-    - Present `options` to the user (numbered menu, HTML form, etc.).
-    - When `escape_hatch != "none"`, append
-      `ESCAPE_HATCH_LABELS[escape_hatch]` as one more choice, on top of
-      `options`.
-    - Return the exact string from `options` the user picked, OR the
-      literal `escape_hatch` value (`"not_sure"` / `"no_preference"`) if
-      the user picked the appended hatch instead. Never return the hatch's
-      display label — callers match on the sentinel value, not on text
-      that's meant to change if the label copy changes.
-
-    `ask_text` implementations must:
-
-    - Present `prompt` to the user and collect one line of free-form text.
-    - Return it stripped of leading/trailing whitespace. Empty string is a
-      valid return (no options to reject it against) — the caller decides
-      what an empty answer means.
+    Implementations must never call terminal/HTTP I/O outside this seam —
+    invariant 9. See the module docstring for what each method owns.
     """
 
-    async def ask(
-        self,
-        question: str,
-        options: list[str],
-        escape_hatch: EscapeHatch = "not_sure",
+    async def ask_choice(
+        self, question: str, options: list[str], escape_hatch: str
     ) -> str: ...
 
-    async def ask_text(self, prompt: str) -> str: ...
+    async def ask_topic(self, topic: TopicPrompt) -> TopicAnswer: ...
+
+    async def offer_bailout(self) -> bool: ...

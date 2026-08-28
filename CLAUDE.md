@@ -36,7 +36,7 @@ Build order is §17 of the spec — that is the source of truth for what each st
 contains. Keep only checkboxes here.
 
 - [x] 1. Data model, store, checkpointing, `confidence.py` tests
-- [ ] 2. `QuestionPort` + CLI port
+- [x] 2. `QuestionPort` + CLI port
 - [ ] 3. Settings + `scout config`
 - [ ] 4. Phase 0 intake
 - [ ] 5. Phase 1 SURVEY + clusters/dimensions + broadening interrupt
