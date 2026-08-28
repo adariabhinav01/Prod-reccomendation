@@ -1,11 +1,12 @@
-"""Run record persistence (spec docs/handoff.md §13's on-disk layout).
+"""Run record persistence (spec docs/handoff.md §16's on-disk layout, v7).
 
     ~/.product-scout/
     ├── config.toml
-    ├── index.json
+    ├── index.json                 # derived; rebuildable by scanning runs/
     └── runs/<run_id>/
         ├── record.json
-        └── report.html      # written later, by render/report.py (step 6)
+        ├── report.html            # written later, by render/report.py (step 6)
+        └── phases/<n>.json        # checkpoints; §16.1 — see store/checkpoint.py
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from product_scout.models import RunRecord
+from product_scout.store import checkpoint
 from product_scout.store.index import RunIndex
 
 DEFAULT_ROOT = Path.home() / ".product-scout"
@@ -81,3 +83,18 @@ class RunStore:
             for p in self.runs_dir.iterdir()
             if p.is_dir() and (p / "record.json").exists()
         )
+
+    # -- checkpointing (§16.1) -------------------------------------------
+    #
+    # Thin delegation to store/checkpoint.py, which operates on a bare
+    # run_dir Path and knows nothing about RunStore. Kept here only for
+    # caller ergonomics — phase code already has a RunStore, not a raw path.
+
+    def save_checkpoint(self, run_id: str, phase: str, data: dict) -> Path:
+        return checkpoint.save_checkpoint(self.run_dir(run_id), phase, data)
+
+    def load_checkpoint(self, run_id: str, phase: str) -> dict | None:
+        return checkpoint.load_checkpoint(self.run_dir(run_id), phase)
+
+    def latest_completed_phase(self, run_id: str) -> str | None:
+        return checkpoint.latest_completed_phase(self.run_dir(run_id))
