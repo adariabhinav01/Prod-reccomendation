@@ -54,7 +54,7 @@ from claude_agent_sdk import ClaudeAgentOptions, query
 
 from product_scout import config
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
-from product_scout.models import Product, SurveyReport
+from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
 from product_scout.tools.record_product import ListProductSink
 from product_scout.tools.server import build_scout_server
@@ -75,6 +75,21 @@ or review_sources. If record_product rejects your call, its error message \
 tells you exactly which field(s) to drop or re-fetch; fix those and call \
 record_product again for that same product.
 
+The buyer is shopping from {location_country} ({location_currency}). For \
+each product, determine whether the storefront you researched is the \
+region-appropriate one for them — the inference ladder and reporting rules \
+are in your skill instructions. Only research and report \
+shipping_estimate_native/duty_estimate_native once you've confirmed the \
+product ships from outside {location_country}; leave both null otherwise.
+
+LOW-EVIDENCE MODE: {low_evidence_mode}. When true, follow your research \
+protocol skill's low-evidence-mode section exactly — community sources and \
+unverified manufacturer performance claims become admissible (labeled as \
+such), and every relaxation you make must be something the report can name \
+explicitly. When false, a community source is never admissible as a \
+spec's source_type — record_product rejects it; put reliability/ownership \
+sentiment in ownership_notes instead.
+
 A fetch failure is routine, not exceptional — report what you couldn't \
 reach and move on to the next source; don't retry the same URL and don't \
 route around it through another fetch method.
@@ -93,6 +108,8 @@ class Extractor(Protocol):
         candidates: list[str],
         survey: SurveyReport,
         ledger: FetchLedger,
+        location: Location,
+        low_evidence_mode: bool,
     ) -> list[Product]: ...
 
 
@@ -101,6 +118,8 @@ async def run_extraction(
     candidates: list[str],
     survey: SurveyReport,
     ledger: FetchLedger,
+    location: Location,
+    low_evidence_mode: bool,
     extractor: Extractor,
 ) -> list[Product]:
     """Thin by design. Short-circuits to `[]` without calling the
@@ -111,10 +130,18 @@ async def run_extraction(
     fewer products come back than candidates went in — has a home later
     without every caller needing to know about it. Nothing more is added
     preemptively; no real caller (`orchestrator.py`) exists yet.
+
+    `location` (build order step 11) is the run's resolved `Location` —
+    threaded straight through to `build_scout_server`'s §10.3
+    confirmed-cross-border gate. `low_evidence_mode` (build order step 12)
+    is threaded the same way, to both the prompt and §14/§8.3's mode-gated
+    `record_product` checks.
     """
     if not candidates:
         return []
-    return await extractor.extract(product_type, candidates, survey, ledger)
+    return await extractor.extract(
+        product_type, candidates, survey, ledger, location, low_evidence_mode
+    )
 
 
 class SdkExtractor:
@@ -137,6 +164,8 @@ class SdkExtractor:
         candidates: list[str],
         survey: SurveyReport,
         ledger: FetchLedger,
+        location: Location,
+        low_evidence_mode: bool,
     ) -> list[Product]:
         # §3: "add a startup assertion that skills actually loaded — fail
         # loudly rather than silently running without the recommendation
@@ -144,10 +173,13 @@ class SdkExtractor:
         assert_skill_loaded(config.RESEARCH_PROTOCOL_SKILL)
 
         sink = ListProductSink()
-        scout_server = build_scout_server(sink, survey, ledger)
+        scout_server = build_scout_server(sink, survey, ledger, location, low_evidence_mode)
         prompt = EXTRACTION_PROMPT_TEMPLATE.format(
             product_type=product_type,
             max_fetches_per_product=config.MAX_EXTRACTION_FETCHES_PER_PRODUCT,
+            location_country=location.country,
+            location_currency=location.currency,
+            low_evidence_mode=low_evidence_mode,
             candidate_list="\n".join(f"- {c}" for c in candidates),
         )
         options = ClaudeAgentOptions(

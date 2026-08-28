@@ -25,6 +25,15 @@ from product_scout.models import EvidenceProfile, Product, SurveyReport, normali
 # are load-bearing; see the function docstring.
 FLIP_FLOOR: float = 0.65
 
+# §8.3 — "Confidence clamped to 0.75... applied after compute_confidence(),
+# both values recorded." Deliberately above FLIP_FLOOR (0.65): the clamp
+# caps *display* confidence, not flip-point eligibility — a low-evidence
+# product is separately, unconditionally denied a flip point regardless of
+# where its confidence lands (§5.2, enforced in `phases/scoring.py`'s
+# `_compute_flip_point`, not here). Conflating the two would make this one
+# number do a job §5.2 explicitly assigns elsewhere.
+LOW_EVIDENCE_CONFIDENCE_CLAMP: float = 0.75
+
 # §4.1 — recency window in days, keyed by SurveyReport.category_kind.
 # "An 18-month-old review still describes the same paddle" (physical) vs.
 # "may describe a different product" (software_service / hybrid).
@@ -107,12 +116,49 @@ def build_evidence_profile(
     product: Product,
     survey: SurveyReport,
     *,
+    low_evidence_mode: bool = False,
     now: datetime | None = None,
 ) -> EvidenceProfile:
     """§4.0d — the ONLY constructor for `EvidenceProfile`. Every field is
     derived from data the run record already holds: `product.specs`,
     `product.ownership_notes`, `product.review_sources`, and
     `survey.comparison_specs` / `survey.category_kind`.
+
+    `low_evidence_mode` applies §8.3's clamp — `min(confidence,
+    LOW_EVIDENCE_CONFIDENCE_CLAMP)` — AFTER `compute_confidence()`, never
+    folded into the formula itself (that would make the clamp look like
+    part of the measurement rather than a separate, disclosed ceiling on
+    it). Defaults `False` rather than being required-with-no-default like
+    `phases/tools/record_product.py`'s `location`/`low_evidence_mode`
+    parameters: this is a widely-reusable pure function (mirrors `now`'s own
+    optional, sensible default), not a phase-boundary seam where an
+    unstated default would silently hide which mode a call ran in.
+
+    **The clamp also fires per-product on a `moderate`-coverage run, even
+    when `low_evidence_mode` (the RUN-level flag) is `False`.** §8.1's own
+    table gives `moderate` a nuance the run-level flag can't carry: "Proceed;
+    low-evidence for under-covered products only." `RunRecord.low_evidence_mode`
+    is a single bool (`phases/survey.py`'s `run_survey` sets it `False` for
+    every `moderate` result, unconditionally) — there is no schema field for
+    "this one product is under-covered." §8.3 itself names exactly this case
+    as the clamp's real justification: "It exists for the moderate coverage
+    path, where a well-covered product sits inside a partially-low-evidence
+    run." So this function checks `survey.coverage` directly, per product,
+    independent of the flag: `coverage == "moderate"` and this PRODUCT's own
+    `independent_review_count < 4` triggers the same clamp.
+
+    `4` is `§8.1`'s own upper bound for "moderate" ("2-4 independent
+    sources") — a CATEGORY-level aggregate, not a per-product figure, so
+    there is no spec-given per-product number to use verbatim; anchoring to
+    that row's own ceiling is the least arbitrary reading available
+    (flagged here, not resolved silently). **`< 2` was considered and
+    rejected as dead code**: `review_credit(n)` caps breadth at `0.6313`
+    for `n == 1` regardless of every other factor maxing out, structurally
+    below `LOW_EVIDENCE_CONFIDENCE_CLAMP` — a clamp gated on `< 2` could
+    never actually fire, which would make this whole fix cosmetic. At
+    `n == 2`, the ceiling is `0.7529` (barely clears); at `n == 3`,
+    `0.8343` — `< 4` is the smallest threshold under which the clamp can
+    meaningfully bind.
 
     Implementation notes on two genuinely underspecified corners of §4.0c
     (flagged here rather than resolved silently, per house style):
@@ -192,14 +238,33 @@ def build_evidence_profile(
         confidence=0.0,  # provisional; computed below and reassigned
         confidence_note="",  # provisional; filled in below
     )
-    confidence = compute_confidence(profile)
-    band = confidence_band(confidence)
+    computed_confidence = compute_confidence(profile)
+    # §8.3: clamp applied AFTER compute_confidence(), both values recorded
+    # (in the note — EvidenceProfile.confidence is one field, per §4.0c's
+    # locked schema, so there's no second numeric slot to hold the
+    # unclamped figure). Rarely binds in practice — a typical low-evidence
+    # profile computes well under 0.75.
+    under_covered_in_moderate_run = survey.coverage == "moderate" and independent_review_count < 4
+    if (low_evidence_mode or under_covered_in_moderate_run) and computed_confidence > LOW_EVIDENCE_CONFIDENCE_CLAMP:
+        confidence = LOW_EVIDENCE_CONFIDENCE_CLAMP
+        reason = (
+            "low-evidence mode"
+            if low_evidence_mode
+            else "under-covered product in a moderate-coverage run (§8.1)"
+        )
+        clamp_note = f" (computed {computed_confidence:.3f}, clamped for {reason})"
+    else:
+        confidence = computed_confidence
+        clamp_note = ""
+    band = confidence_band(confidence)  # banded on the FINAL (possibly
+    # clamped) value — the note must never claim a band the displayed
+    # number doesn't actually sit in.
     profile.confidence = confidence
     profile.confidence_note = (
         f"{independent_review_count} independent review(s), "
         f"{'Tier 1 specs' if has_tier1_specs else 'no Tier 1 specs'}, "
         f"{'methodology-backed' if has_methodology_backed_source else 'no methodology-backed source'}, "
         f"{corroboration_ratio:.0%} corroborated, {conflict_ratio:.0%} conflicted "
-        f"→ {band} confidence."
+        f"→ {band} confidence.{clamp_note}"
     )
     return profile

@@ -18,6 +18,7 @@ from product_scout.phases.survey import (
     STOP_OPTION,
     RawSurvey,
     Surveyor,
+    _repair_comparison_specs,
     _validate_secondhand_risk_factors,
     _verify_exemplars,
     run_survey,
@@ -88,8 +89,9 @@ def make_raw(**overrides) -> RawSurvey:
     # constraint aren't tripped by it — see test_verify_exemplars below for
     # the constraint's own dedicated tests.
     evidence_pool = overrides.pop("evidence_pool", ["The Widget Pro is a popular choice."])
+    caveats = overrides.pop("caveats", [])
     report = make_survey_report(**overrides)
-    return RawSurvey(report=report, evidence_pool=evidence_pool)
+    return RawSurvey(report=report, evidence_pool=evidence_pool, caveats=caveats)
 
 
 # -- protocol conformance -----------------------------------------------------
@@ -362,6 +364,85 @@ def test_duplicate_broader_category_names_are_deduped():
     # First occurrence wins the dedup (moderate), so its annotation survives.
     assert options.count('Research "broader widgets" instead (moderate coverage)') == 1
     assert not any("rich coverage" in opt for opt in options)
+
+
+# -- _repair_comparison_specs: §4.0b, found by build order step 12's live
+# verification (SdkSurveyor had no recovery from this — real, reproducible) --
+
+
+def test_repair_injects_missing_dimension_names():
+    parsed = {
+        "comparison_specs": ["weight"],
+        "dimensions": [{"name": "weight"}, {"name": "material"}, {"name": "color"}],
+    }
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired["comparison_specs"] == ["weight", "material", "color"]
+    assert len(caveats) == 1
+    assert "material" in caveats[0] and "color" in caveats[0]
+
+
+def test_repair_noop_when_already_a_superset():
+    parsed = {
+        "comparison_specs": ["weight", "material", "extra_spec"],
+        "dimensions": [{"name": "weight"}, {"name": "material"}],
+    }
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired["comparison_specs"] == ["weight", "material", "extra_spec"]
+    assert caveats == []
+
+
+def test_repair_noop_when_no_dimensions():
+    parsed = {"comparison_specs": ["weight"], "dimensions": []}
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired is parsed  # untouched — not even a copy needed
+    assert caveats == []
+
+
+def test_repair_does_not_mutate_input():
+    parsed = {
+        "comparison_specs": ["weight"],
+        "dimensions": [{"name": "material"}],
+    }
+    original = {k: list(v) for k, v in parsed.items()}
+    _repair_comparison_specs(parsed)
+    assert parsed == original
+
+
+def test_repair_leaves_malformed_dimensions_alone():
+    """Not a general sanitizer — a genuinely malformed response should
+    still fail loudly at SurveyReport(**parsed), not be coerced quietly."""
+    parsed = {"comparison_specs": ["weight"], "dimensions": "not a list"}
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired is parsed
+    assert caveats == []
+
+
+def test_repair_leaves_malformed_comparison_specs_alone():
+    parsed = {"comparison_specs": "not a list", "dimensions": [{"name": "material"}]}
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired is parsed
+    assert caveats == []
+
+
+def test_repair_skips_dimensions_missing_a_name():
+    parsed = {
+        "comparison_specs": [],
+        "dimensions": [{"splits": {}}, {"name": None}, {"name": ""}, {"name": "material"}],
+    }
+    repaired, caveats = _repair_comparison_specs(parsed)
+    assert repaired["comparison_specs"] == ["material"]
+    assert len(caveats) == 1
+
+
+def test_run_survey_propagates_repair_caveat_from_surveyor():
+    """End to end: whatever a Surveyor puts on RawSurvey.caveats reaches
+    SurveyOutcome.caveats — the seam _repair_comparison_specs plugs into."""
+    surveyor = FakeSurveyor(
+        {"widgets": make_raw(coverage="rich", caveats=["comparison_specs was missing ['x']"])}
+    )
+    port, _ = make_port([])
+    outcome = run(run_survey("widgets", make_location(), surveyor, port, FetchLedger()))
+    assert "comparison_specs was missing ['x']" in outcome.caveats
 
 
 # -- _verify_exemplars: §8.1a constraint 1 ------------------------------------

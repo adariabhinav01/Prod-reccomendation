@@ -22,10 +22,10 @@ class FakeTimingResearcher:
 
     def __init__(self, assessment: TimingAssessment):
         self._assessment = assessment
-        self.calls: list[tuple[str, list[str], FetchLedger]] = []
+        self.calls: list[tuple[str, list[str], FetchLedger, bool]] = []
 
-    async def research(self, product_type, product_names, ledger) -> TimingAssessment:
-        self.calls.append((product_type, product_names, ledger))
+    async def research(self, product_type, product_names, ledger, low_evidence_mode) -> TimingAssessment:
+        self.calls.append((product_type, product_names, ledger, low_evidence_mode))
         return self._assessment
 
 
@@ -85,18 +85,24 @@ def test_run_timing_passes_through_and_applies_discipline():
     researcher = FakeTimingResearcher(clean)
     ledger = FetchLedger()
 
-    outcome = run(run_timing("standing desks", ["Widget Pro"], ledger, researcher))
+    outcome = run(run_timing("standing desks", ["Widget Pro"], ledger, False, researcher))
 
     assert outcome.timing == clean
     assert outcome.caveats == []
-    assert researcher.calls == [("standing desks", ["Widget Pro"], ledger)]
+    assert researcher.calls == [("standing desks", ["Widget Pro"], ledger, False)]
 
 
 def test_run_timing_downgrades_via_researcher_output():
     unbacked = make_timing_assessment(signal_found=True, basis_notes=[], recommends_wait=True)
     researcher = FakeTimingResearcher(unbacked)
 
-    outcome = run(run_timing("standing desks", [], FetchLedger(), researcher))
+    outcome = run(run_timing("standing desks", [], FetchLedger(), False, researcher))
 
     assert outcome.timing.signal_found is False
     assert len(outcome.caveats) == 1
+
+
+def test_run_timing_threads_low_evidence_mode_to_researcher():
+    researcher = FakeTimingResearcher(make_timing_assessment())
+    run(run_timing("standing desks", [], FetchLedger(), True, researcher))
+    assert researcher.calls[0][3] is True

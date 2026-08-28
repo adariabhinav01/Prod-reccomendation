@@ -50,13 +50,17 @@ individual basis note is *actually* a good basis — that's exactly the kind
 of judgment invariant 4 reserves for the model; it only catches the
 structurally-checkable case of a signal claimed with no basis at all.
 
-### Not threaded through: `low_evidence_mode`, and §6.5's basis-per-claim
+### `low_evidence_mode` (build order step 12), and §6.5's basis-per-claim
 ### granularity
 
-Neither this phase's prompt nor its signature mentions `low_evidence_mode`
-— an inherited gap, not one introduced here: `phases/extraction.py` (build
-order step 8) has the identical gap already. See `phases/prior_gen.py`'s
-module docstring, added the same build step, for the fuller note.
+Closed the gap this docstring used to flag: neither the prompt nor the
+signature mentioned `low_evidence_mode`, even though `research-protocol`'s
+skill content is conditional on it. Unlike EXTRACTION/PRIOR-GEN, this
+phase never calls `record_product` — `TimingAssessment` has no
+`SourcedValue` field at all (see "No ledger validation here" below) — so
+there's no §14 spec-source-type gate to wire, only the prompt line telling
+the model which mode it's in, so it can label a timing claim's basis
+accordingly (§8.3: "every relaxation logged").
 
 Separately, `_enforce_basis_discipline` only checks that `basis_notes` is
 non-empty when `signal_found` is true — it cannot verify that EVERY
@@ -107,6 +111,12 @@ rather than manufacturing a signal.
 
 Budget yourself to roughly {max_searches} searches.
 
+LOW-EVIDENCE MODE: {low_evidence_mode}. When true, a weaker or single-
+source timing signal is still worth reporting — label its basis honestly \
+(e.g. "one forum post claims X, unverified") rather than omitting it \
+outright, following your research protocol skill's low-evidence-mode \
+section. When false, hold to the normal bar: no bare claims.
+
 A fetch or search failure is routine, not exceptional — report what you \
 couldn't reach and move on; don't retry the same query and don't route \
 around a failure through another method.
@@ -122,7 +132,11 @@ class TimingResearcher(Protocol):
     """Seam for Phase 4's actual research call."""
 
     async def research(
-        self, product_type: str, product_names: list[str], ledger: FetchLedger
+        self,
+        product_type: str,
+        product_names: list[str],
+        ledger: FetchLedger,
+        low_evidence_mode: bool,
     ) -> TimingAssessment: ...
 
 
@@ -160,12 +174,13 @@ async def run_timing(
     product_type: str,
     product_names: list[str],
     ledger: FetchLedger,
+    low_evidence_mode: bool,
     researcher: TimingResearcher,
 ) -> TimingOutcome:
     """Run Phase 4 end to end: research (one Haiku call), then enforce
     §6.5's basis discipline in Python. No gate, no interrupt, no re-prompt
     loop — see module docstring on why this phase doesn't have one."""
-    assessment = await researcher.research(product_type, product_names, ledger)
+    assessment = await researcher.research(product_type, product_names, ledger, low_evidence_mode)
     assessment, caveats = _enforce_basis_discipline(assessment)
     return TimingOutcome(timing=assessment, caveats=caveats)
 
@@ -214,7 +229,11 @@ class SdkTimingResearcher:
         self._model = model
 
     async def research(
-        self, product_type: str, product_names: list[str], ledger: FetchLedger
+        self,
+        product_type: str,
+        product_names: list[str],
+        ledger: FetchLedger,
+        low_evidence_mode: bool,
     ) -> TimingAssessment:
         # §3: fail loudly before spending anything if either skill isn't
         # there to be loaded.
@@ -225,6 +244,7 @@ class SdkTimingResearcher:
             product_type=product_type,
             product_names=", ".join(product_names) if product_names else "none named yet",
             max_searches=config.MAX_TIMING_SEARCHES,
+            low_evidence_mode=low_evidence_mode,
             schema=json.dumps(TimingAssessment.model_json_schema()),
         )
         options = ClaudeAgentOptions(

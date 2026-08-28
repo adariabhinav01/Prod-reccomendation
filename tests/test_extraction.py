@@ -10,9 +10,9 @@ circuit logic (against a fake) is tested here.
 import asyncio
 
 from product_scout.hooks.ledger import FetchLedger
-from product_scout.models import Product, SurveyReport
+from product_scout.models import Location, Product, SurveyReport
 from product_scout.phases.extraction import Extractor, run_extraction
-from tests.conftest import make_product, make_survey_report
+from tests.conftest import make_location, make_product, make_survey_report
 
 
 def run(coro):
@@ -21,12 +21,12 @@ def run(coro):
 
 class FakeExtractor:
     """Extractor test double: returns a fixed product list, regardless of
-    input, and records every (product_type, candidates, survey, ledger)
-    call it actually received."""
+    input, and records every (product_type, candidates, survey, ledger,
+    location, low_evidence_mode) call it actually received."""
 
     def __init__(self, products: list[Product]):
         self._products = products
-        self.calls: list[tuple[str, list[str], SurveyReport, FetchLedger]] = []
+        self.calls: list[tuple[str, list[str], SurveyReport, FetchLedger, Location, bool]] = []
 
     async def extract(
         self,
@@ -34,8 +34,10 @@ class FakeExtractor:
         candidates: list[str],
         survey: SurveyReport,
         ledger: FetchLedger,
+        location: Location,
+        low_evidence_mode: bool,
     ) -> list[Product]:
-        self.calls.append((product_type, candidates, survey, ledger))
+        self.calls.append((product_type, candidates, survey, ledger, location, low_evidence_mode))
         return self._products
 
 
@@ -48,18 +50,23 @@ def test_run_extraction_passes_through():
     extractor = FakeExtractor(products)
     survey = make_survey_report()
     ledger = FetchLedger()
+    location = make_location()
 
-    result = run(run_extraction("widgets", ["Widget Pro"], survey, ledger, extractor))
+    result = run(
+        run_extraction("widgets", ["Widget Pro"], survey, ledger, location, True, extractor)
+    )
 
     assert result == products
     assert len(extractor.calls) == 1
-    assert extractor.calls[0] == ("widgets", ["Widget Pro"], survey, ledger)
+    assert extractor.calls[0] == ("widgets", ["Widget Pro"], survey, ledger, location, True)
 
 
 def test_empty_candidates_short_circuits_without_calling_extractor():
     extractor = FakeExtractor([make_product()])
     result = run(
-        run_extraction("widgets", [], make_survey_report(), FetchLedger(), extractor)
+        run_extraction(
+            "widgets", [], make_survey_report(), FetchLedger(), make_location(), False, extractor
+        )
     )
     assert result == []
     assert extractor.calls == []

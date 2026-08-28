@@ -45,8 +45,8 @@ contains. Keep only checkboxes here.
 - [x] 8. Phase 3 EXTRACTION + ledger validation
 - [x] 9. Phases 6a/6b + constraint enforcement
 - [x] 10. Phases 4–5 timing + prior-gen
-- [ ] 11. Location end to end
-- [ ] 12. Low-evidence + commodity modes
+- [x] 11. Location end to end
+- [x] 12. Low-evidence + commodity modes
 - [ ] 13. Hooks, cost caps, truncation
 - [ ] 14. `rescore` + `history`
 - [ ] 15. Golden set (§17.1) — gates skill edits from here on

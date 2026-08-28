@@ -11,14 +11,14 @@ import asyncio
 import jsonschema
 import pytest
 
-from product_scout.confidence import compute_confidence
+from product_scout.confidence import LOW_EVIDENCE_CONFIDENCE_CLAMP, compute_confidence
 from product_scout.hooks.ledger import FetchLedger
 from product_scout.tools.record_product import (
     RECORD_PRODUCT_SCHEMA,
     ListProductSink,
     make_record_product,
 )
-from tests.conftest import make_survey_report
+from tests.conftest import make_location, make_survey_report
 
 SPEC_URL = "https://example.com/spec-sheet"
 PRICE_URL = "https://example.com/product"
@@ -82,8 +82,10 @@ def full_valid_args(**overrides) -> dict:
     return defaults
 
 
-def call_record_product(sink, ledger, args, *, survey=None):
-    tool_def = make_record_product(sink, survey or make_survey_report(), ledger)
+def call_record_product(sink, ledger, args, *, survey=None, location=None, low_evidence_mode=False):
+    tool_def = make_record_product(
+        sink, survey or make_survey_report(), ledger, location or make_location(), low_evidence_mode
+    )
     return run(tool_def.handler(args))
 
 
@@ -389,8 +391,208 @@ def test_confidence_note_is_deterministic():
 
 
 def test_availability_defaults_are_never_model_supplied():
+    """No ships_from info at all in the args -> stays undetermined. Unlike
+    the pre-step-11 version of this test, `ships_from_confidence` is now a
+    REAL derivation (`location.ships_from_confidence_for`), not a
+    hard-coded placeholder — it just happens to agree with 0.0 here because
+    `ships_from_signal` is None, exactly as `ships_from_confidence_for(None)`
+    is unit-tested to do in test_location.py."""
     sink = ListProductSink()
     call_record_product(sink, default_ledger(), full_valid_args())
     availability = sink.products[0].availability
     assert availability.ships_from_confidence == 0.0
     assert availability.ships_from_signal is None
+
+
+# -- §10.6/§10.3 ships_from ladder + landed pricing (build order step 11) ---
+
+SHIPPING_POLICY_URL = "https://example.com/shipping-policy"
+
+
+def _args_with_ships_from(**availability_overrides) -> dict:
+    args = full_valid_args()
+    args["availability"] = {"sold_in_region": True, **availability_overrides}
+    return args
+
+
+def test_ships_from_confidence_is_derived_from_reported_signal():
+    sink = ListProductSink()
+    ledger = make_ledger(
+        fetched=[SPEC_URL, PRICE_URL, SHIPPING_POLICY_URL], seen=[REVIEW_URL]
+    )
+    args = _args_with_ships_from(
+        ships_from="DE",
+        ships_from_signal="shipping_policy",
+        ships_from_source_url=SHIPPING_POLICY_URL,
+    )
+    call_record_product(sink, ledger, args)
+    availability = sink.products[0].availability
+    assert availability.ships_from == "DE"
+    assert availability.ships_from_signal == "shipping_policy"
+    assert availability.ships_from_confidence == 0.98
+
+
+def test_ships_from_source_url_required_alongside_signal():
+    sink = ListProductSink()
+    args = _args_with_ships_from(ships_from="DE", ships_from_signal="shipping_policy")
+    result = call_record_product(sink, default_ledger(), args)
+    assert result["is_error"] is True
+    assert "ships_from_source_url" in result["content"][0]["text"]
+    assert sink.products == []
+
+
+def test_ships_from_source_url_is_ledger_validated():
+    sink = ListProductSink()
+    args = _args_with_ships_from(
+        ships_from="DE",
+        ships_from_signal="shipping_policy",
+        ships_from_source_url=SHIPPING_POLICY_URL,  # never fetched or seen
+    )
+    result = call_record_product(sink, default_ledger(), args)
+    assert result["is_error"] is True
+    assert "ships_from_source_url" in result["content"][0]["text"]
+
+
+def test_cctld_claim_on_excluded_tld_is_downgraded_to_fallback():
+    """§10.6's exclusion list, exercised through the tool boundary."""
+    sink = ListProductSink()
+    io_url = "https://example.io/shipping"
+    ledger = make_ledger(fetched=[SPEC_URL, PRICE_URL, io_url], seen=[REVIEW_URL])
+    args = _args_with_ships_from(
+        ships_from="DE", ships_from_signal="cctld", ships_from_source_url=io_url
+    )
+    call_record_product(sink, ledger, args)
+    availability = sink.products[0].availability
+    assert availability.ships_from_signal == "fallback"
+    assert availability.ships_from_confidence == 0.25
+
+
+def test_confirmed_cross_border_computes_landed_price():
+    sink = ListProductSink()
+    ledger = make_ledger(
+        fetched=[SPEC_URL, PRICE_URL, SHIPPING_POLICY_URL], seen=[REVIEW_URL]
+    )
+    args = _args_with_ships_from(
+        ships_from="DE",
+        ships_from_signal="shipping_policy",
+        ships_from_source_url=SHIPPING_POLICY_URL,
+        shipping_estimate_native=15.0,
+        duty_estimate_native=5.0,
+    )
+    call_record_product(sink, ledger, args, location=make_location(country="US", currency="USD"))
+    availability = sink.products[0].availability
+    assert availability.landed_price_native == 219.0  # 199.0 upfront + 15 + 5
+
+
+def test_same_region_product_never_gets_a_landed_price_even_if_model_sent_one():
+    """Defensive: §10.3's gate is enforced in code, not trusted from the
+    model — a same-region product's shipping/duty figures are discarded."""
+    sink = ListProductSink()
+    ledger = make_ledger(
+        fetched=[SPEC_URL, PRICE_URL, SHIPPING_POLICY_URL], seen=[REVIEW_URL]
+    )
+    args = _args_with_ships_from(
+        ships_from="US",
+        ships_from_signal="shipping_policy",
+        ships_from_source_url=SHIPPING_POLICY_URL,
+        shipping_estimate_native=15.0,
+        duty_estimate_native=5.0,
+    )
+    call_record_product(sink, ledger, args, location=make_location(country="US", currency="USD"))
+    availability = sink.products[0].availability
+    assert availability.shipping_estimate_native is None
+    assert availability.duty_estimate_native is None
+    assert availability.landed_price_native is None
+
+
+# -- §14/§8.3 community-source-for-specs gate + confidence clamp (build order step 12) --
+
+
+def _args_with_community_spec(**overrides) -> dict:
+    args = full_valid_args(**overrides)
+    args["specs"] = {
+        "weight": {
+            "value": "42 lb",
+            "source_url": "https://forum.example.com/thread/42",
+            "source_type": "community",
+            "has_stated_methodology": False,
+            "observed_at": "2026-08-01T00:00:00+00:00",
+        }
+    }
+    return args
+
+
+def test_community_spec_rejected_in_standard_mode():
+    sink = ListProductSink()
+    ledger = make_ledger(
+        fetched=[PRICE_URL, "https://forum.example.com/thread/42"], seen=[REVIEW_URL]
+    )
+    result = call_record_product(
+        sink, ledger, _args_with_community_spec(), low_evidence_mode=False
+    )
+    assert result["is_error"] is True
+    assert "specs['weight']" in result["content"][0]["text"]
+    assert "community" in result["content"][0]["text"].lower()
+    assert sink.products == []
+
+
+def test_community_spec_admitted_in_low_evidence_mode():
+    sink = ListProductSink()
+    ledger = make_ledger(
+        fetched=[PRICE_URL, "https://forum.example.com/thread/42"], seen=[REVIEW_URL]
+    )
+    result = call_record_product(
+        sink, ledger, _args_with_community_spec(), low_evidence_mode=True
+    )
+    assert result.get("is_error") is not True
+    assert len(sink.products) == 1
+    assert sink.products[0].specs["weight"].source_type == "community"
+
+
+def test_non_community_spec_unaffected_by_mode():
+    """The gate is source_type-specific — a manufacturer spec is admissible
+    in either mode."""
+    sink_standard, sink_low = ListProductSink(), ListProductSink()
+    result_standard = call_record_product(
+        sink_standard, default_ledger(), full_valid_args(), low_evidence_mode=False
+    )
+    result_low = call_record_product(
+        sink_low, default_ledger(), full_valid_args(), low_evidence_mode=True
+    )
+    assert result_standard.get("is_error") is not True
+    assert result_low.get("is_error") is not True
+
+
+def test_low_evidence_mode_threaded_to_confidence_clamp():
+    """End-to-end: record_product's low_evidence_mode reaches
+    build_evidence_profile's §8.3 clamp, not just the spec-gate check."""
+    # A saturated-evidence product (6 review sources, tier-1 + methodology,
+    # corroborated) computes well above LOW_EVIDENCE_CONFIDENCE_CLAMP.
+    args = full_valid_args(
+        specs={
+            "weight": {
+                "value": "42 lb",
+                "source_url": SPEC_URL,
+                "source_type": "manufacturer",
+                "has_stated_methodology": True,
+                "corroborated_by": ["https://other.example.com/review"],
+                "observed_at": "2026-08-01T00:00:00+00:00",
+            }
+        },
+        review_sources=[f"https://example.com/review{i}" for i in range(6)],
+    )
+    ledger = make_ledger(
+        fetched=[SPEC_URL, PRICE_URL],
+        seen=[f"https://example.com/review{i}" for i in range(6)],
+    )
+
+    sink_standard = ListProductSink()
+    call_record_product(sink_standard, ledger, args, low_evidence_mode=False)
+    unclamped = sink_standard.products[0].evidence.confidence
+
+    sink_low = ListProductSink()
+    call_record_product(sink_low, ledger, args, low_evidence_mode=True)
+    clamped = sink_low.products[0].evidence.confidence
+
+    assert unclamped > LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert clamped == LOW_EVIDENCE_CONFIDENCE_CLAMP

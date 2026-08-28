@@ -318,6 +318,49 @@ def test_availability_secondhand_sources_are_collapsed():
     assert "Batteries degrade after 2 years." in html
 
 
+def test_availability_detail_shows_shipping_duty_and_landed_price():
+    """Build order step 11: shipping/duty estimates render (previously
+    dropped entirely), and a sub-0.95 ships_from_confidence reads as
+    'uncertain' in words, not just a bare number."""
+    product = make_product(
+        name="Cross-Border Widget",
+        availability=make_availability(
+            sold_in_region=True,
+            ships_from="DE",
+            ships_from_signal="cctld",
+            ships_from_confidence=0.90,
+            shipping_estimate_native=15.0,
+            duty_estimate_native=5.0,
+            landed_price_native=219.0,
+        ),
+    )
+    run = make_run_record(
+        products=[product], scores=[make_scored(product_name="Cross-Border Widget")]
+    )
+    html = render_html(run)
+    assert "estimated shipping: 15.00" in html
+    assert "estimated duty: 5.00" in html
+    assert "landed price: 219.00" in html
+    assert "uncertain" in html
+
+
+def test_availability_detail_shows_confirmed_for_high_confidence_signal():
+    product = make_product(
+        name="Confirmed Widget",
+        availability=make_availability(
+            sold_in_region=True,
+            ships_from="DE",
+            ships_from_signal="shipping_policy",
+            ships_from_confidence=0.98,
+        ),
+    )
+    run = make_run_record(
+        products=[product], scores=[make_scored(product_name="Confirmed Widget")]
+    )
+    html = render_html(run)
+    assert "confirmed" in html
+
+
 def test_secondhand_section_absent_when_no_risk_factors():
     run = make_run_record()  # default survey has secondhand_risk_factors=[]
     html = render_html(run)

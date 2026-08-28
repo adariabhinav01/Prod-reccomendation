@@ -130,8 +130,9 @@ class Availability(BaseModel):
     )
     ships_from_confidence: float  # DERIVED from ships_from_signal; §10.6 — a
     # pure function of the signal, never model-asserted (invariant 4's
-    # ships_from_confidence clause). The derivation itself lands at build
-    # order step 11 (§10); this schema seam is what step 1 owns.
+    # ships_from_confidence clause). Derived by
+    # location.ships_from_confidence_for (build order step 11); this schema
+    # seam is what step 1 owned.
     import_caveats: list[str] = []
     shipping_estimate_native: float | None = None  # only when CONFIRMED cross-border
     duty_estimate_native: float | None = None

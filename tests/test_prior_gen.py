@@ -15,7 +15,7 @@ from product_scout.phases.prior_gen import (
     _admit_finding,
     run_prior_gen,
 )
-from tests.conftest import make_product, make_survey_report
+from tests.conftest import make_location, make_product, make_survey_report
 
 SPEC_URL = "https://example.com/prior-spec-sheet"
 PRICE_URL = "https://example.com/prior-product"
@@ -105,8 +105,8 @@ class FakePriorGenResearcher:
         self._raw = raw
         self.calls: list[tuple] = []
 
-    async def research(self, seeds, ledger) -> RawPriorGen:
-        self.calls.append((seeds, ledger))
+    async def research(self, seeds, ledger, low_evidence_mode) -> RawPriorGen:
+        self.calls.append((seeds, ledger, low_evidence_mode))
         return self._raw
 
 
@@ -122,7 +122,7 @@ def test_admit_finding_silent_when_no_predecessor_found():
     seed = make_product(name="Widget Pro")
     finding = make_finding(predecessor_found=False, worth_promoting=False, product=None)
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger(), make_location(), False)
 
     assert product is None
     assert caveat is None  # absence of relevance — no caveat manufactured
@@ -134,7 +134,7 @@ def test_admit_finding_silent_when_not_worth_promoting():
     seed = make_product(name="Widget Pro")
     finding = make_finding(predecessor_found=True, worth_promoting=False, product=None)
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger(), make_location(), False)
 
     assert product is None
     assert caveat is None
@@ -142,7 +142,7 @@ def test_admit_finding_silent_when_not_worth_promoting():
 
 def test_admit_finding_silent_on_unknown_seed_name():
     finding = make_finding(seed_product_name="Ghost Product")
-    product, caveat = _admit_finding(finding, {}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {}, make_survey_report(), default_ledger(), make_location(), False)
     assert product is None
     assert caveat is None
 
@@ -154,7 +154,7 @@ def test_admit_finding_discloses_missing_product_data():
     seed = make_product(name="Widget Pro")
     finding = make_finding(product=None)
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger(), make_location(), False)
 
     assert product is None
     assert caveat is not None
@@ -166,7 +166,7 @@ def test_admit_finding_discloses_ledger_rejection():
     finding = make_finding()
     bad_ledger = make_ledger(fetched=[PRICE_URL], seen=[REVIEW_URL])  # SPEC_URL missing
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), bad_ledger)
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), bad_ledger, make_location(), False)
 
     assert product is None
     assert caveat is not None
@@ -180,7 +180,7 @@ def test_admit_finding_discloses_malformed_product_dict():
     del broken_args["cons"]  # required key missing -> KeyError inside build_product_from_args
     finding = make_finding(product=broken_args)
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger(), make_location(), False)
 
     assert product is None
     assert caveat is not None
@@ -191,7 +191,7 @@ def test_admit_finding_builds_product_and_forces_structural_fields():
     seed = make_product(name="Widget Pro", cluster_key="mid-tier")
     finding = make_finding()
 
-    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger())
+    product, caveat = _admit_finding(finding, {"Widget Pro": seed}, make_survey_report(), default_ledger(), make_location(), False)
 
     assert caveat is None
     assert product is not None
@@ -210,7 +210,9 @@ def test_run_prior_gen_short_circuits_on_no_current_gen_seeds():
     prior_seed = make_product(name="Widget Classic", generation="prior")
 
     outcome = run(
-        run_prior_gen([prior_seed], make_survey_report(), FetchLedger(), researcher)
+        run_prior_gen(
+            [prior_seed], make_survey_report(), FetchLedger(), make_location(), False, researcher
+        )
     )
 
     assert outcome.products == []
@@ -225,7 +227,12 @@ def test_run_prior_gen_filters_to_current_generation_seeds():
 
     run(
         run_prior_gen(
-            [current_seed, prior_seed], make_survey_report(), FetchLedger(), researcher
+            [current_seed, prior_seed],
+            make_survey_report(),
+            FetchLedger(),
+            make_location(),
+            False,
+            researcher,
         )
     )
 
@@ -248,9 +255,54 @@ def test_run_prior_gen_end_to_end_mixed_findings():
     researcher = FakePriorGenResearcher(RawPriorGen(findings=findings))
 
     outcome = run(
-        run_prior_gen([seed], make_survey_report(), default_ledger(), researcher)
+        run_prior_gen(
+            [seed], make_survey_report(), default_ledger(), make_location(), False, researcher
+        )
     )
 
     assert len(outcome.products) == 1
     assert outcome.products[0].generation == "prior"
     assert outcome.caveats == []  # the silent finding contributed nothing
+
+
+def test_run_prior_gen_threads_low_evidence_mode_to_researcher():
+    seed = make_product(name="Widget Pro", generation="current")
+    researcher = FakePriorGenResearcher(RawPriorGen(findings=[]))
+    run(
+        run_prior_gen(
+            [seed], make_survey_report(), FetchLedger(), make_location(), True, researcher
+        )
+    )
+    assert researcher.calls[0][2] is True
+
+
+def test_run_prior_gen_threads_low_evidence_mode_to_admit_finding():
+    """A community-sourced predecessor spec is rejected in standard mode
+    and admitted in low-evidence mode — end to end through run_prior_gen,
+    not just at _admit_finding's own boundary."""
+    seed = make_product(name="Widget Pro", cluster_key="mid-tier", generation="current")
+    community_args = full_valid_product_args(
+        specs={
+            "weight": {
+                "value": "44 lb",
+                "source_url": "https://forum.example.com/thread/1",
+                "source_type": "community",
+                "has_stated_methodology": False,
+                "observed_at": "2026-08-01T00:00:00+00:00",
+            }
+        }
+    )
+    finding = make_finding(product=community_args)
+    ledger = make_ledger(fetched=[PRICE_URL, "https://forum.example.com/thread/1"], seen=[REVIEW_URL])
+    researcher = FakePriorGenResearcher(RawPriorGen(findings=[finding]))
+
+    standard_outcome = run(
+        run_prior_gen([seed], make_survey_report(), ledger, make_location(), False, researcher)
+    )
+    assert standard_outcome.products == []
+    assert len(standard_outcome.caveats) == 1
+
+    low_evidence_outcome = run(
+        run_prior_gen([seed], make_survey_report(), ledger, make_location(), True, researcher)
+    )
+    assert len(low_evidence_outcome.products) == 1
