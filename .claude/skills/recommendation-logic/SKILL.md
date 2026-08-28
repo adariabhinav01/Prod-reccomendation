@@ -98,6 +98,19 @@ separates the products in question and say so honestly; don't invent a
 distinction that isn't there if one truly doesn't exist (a low-
 differentiation, commodity-like set is a real finding, not a failure).
 
+**When the prompt tells you `COMMODITY CATEGORY: True`, or `LOW-EVIDENCE
+MODE: True`**, you won't be re-prompted for archetype diversity at all
+either way — a commodity run has been flagged as low-differentiation
+against a large catalog (§8.4); a low-evidence run's thin evidence
+similarly doesn't support manufacturing narrative distinctions (§8.3's
+"table constraints scale down"). Either relaxes the requirement
+structurally, not something you need to argue your way out of. Say so
+plainly wherever it's relevant — in `strength_archetype` choices and,
+especially, in the write-up — rather than manufacturing distinctions to
+look thorough. The two can apply together or separately; when relevant,
+name whichever actually applies rather than assuming they're the same
+thing.
+
 ## Verdict is independent of ranking
 
 Decide `Verdict.action` on its own terms, separately from which product

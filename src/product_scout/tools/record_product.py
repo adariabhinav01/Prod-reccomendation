@@ -39,17 +39,39 @@ before, plus a third this build step adds:
   not a page."); `ownership_notes` and `review_sources` — both judgment-
   bearing per §14 — accept either `fetched` or `seen_not_fetched`.
 
-### `Availability` and `role` are intentionally minimal here
+### `Availability`'s full shape (build order step 11, §10)
 
-`Availability`'s full shape (`ships_from`, `ships_from_signal`, the §10.6
-inference ladder, landed pricing) is explicitly a later, separate build
-step ("11. Location end to end") — this handler accepts only
-`sold_in_region` from the model and fills the rest with the "not yet
-determined" defaults (`ships_from_confidence=0.0` — never model-supplied;
-CLAUDE.md invariant 4 names this field specifically alongside
-`confidence`). `role` defaults to `Product`'s own default
+The model reports `sold_in_region`, `ships_to_region`, and — when it can
+place the storefront on the §10.6 inference ladder — `ships_from`,
+`ships_from_signal`, and the `ships_from_source_url` that grounded that
+claim (required together: judgment about *where this ships from* is a
+factual page claim, so it goes through the same §4.3 ledger check as a
+spec). `ships_from_confidence` is never accepted from the model at all —
+still not even a schema property, CLAUDE.md invariant 4's example — and is
+derived here via `location.ships_from_confidence_for`, after
+`location.validate_ships_from_signal` has had a chance to downgrade an
+unverifiable `cctld` claim. `shipping_estimate_native`/`duty_estimate_native`
+are accepted too, but only ever *used*: `location.resolve_landed_pricing`
+nulls all three landed-cost fields outright unless `ships_from` is confirmed
+cross-border against the `location: Location` this function now takes as a
+required parameter (§10.3's "only when needed" gate, enforced in code, not
+trusted from the prompt). `role` defaults to `Product`'s own default
 (`"recommendation"`) when the model omits it; baseline/reference role-
 tagging logic (§7.2) isn't wired at the prompt level in this step either.
+
+### Community sources for specs — mode-gated (build order step 12, §14)
+
+§14: "Community sources — bounded purpose in standard mode... **Never
+admissible for:** spec values... **Low-evidence mode:** all sources
+admissible for all purposes." The JSON schema can't express this — a valid
+`source_type` enum member is valid regardless of mode — so it's enforced in
+Python, in the same bad-fields pass as the §4.3 ledger check: a `specs[*]`
+entry with `source_type == "community"` is rejected in standard mode and
+admitted in low-evidence mode. `low_evidence_mode: bool` is therefore now a
+required parameter here too, mirroring `location`'s "no default — a
+phase-boundary seam, not a widely-reusable pure function" treatment from
+build order step 11, and threaded straight through to
+`build_evidence_profile`'s §8.3 confidence clamp.
 
 ### Construction is two-pass: placeholder evidence, then the real one
 
@@ -98,9 +120,16 @@ from pydantic import ValidationError
 
 from product_scout.confidence import build_evidence_profile
 from product_scout.hooks.ledger import FetchLedger
+from product_scout.location import (
+    is_confirmed_cross_border,
+    resolve_landed_pricing,
+    ships_from_confidence_for,
+    validate_ships_from_signal,
+)
 from product_scout.models import (
     Availability,
     EvidenceProfile,
+    Location,
     PricingModel,
     Product,
     SourcedValue,
@@ -201,6 +230,47 @@ _AVAILABILITY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "sold_in_region": {"type": "boolean"},
+        "ships_to_region": {"type": ["boolean", "null"]},
+        "ships_from": {
+            "type": ["string", "null"],
+            "description": (
+                "The storefront's region, per the inference ladder in your "
+                "skill instructions — ISO 3166-1 alpha-2 where determinable "
+                "(e.g. 'DE'), else the broader market it serves (e.g. 'EU'). "
+                "Omit (null) when you can't place it on any rung of the ladder."
+            ),
+        },
+        "ships_from_signal": {
+            "type": ["string", "null"],
+            "enum": ["shipping_policy", "cctld", "currency", "language", "fallback", None],
+            "description": (
+                "Which rung of the ladder you used to determine ships_from. "
+                "Required together with ships_from — never a confidence "
+                "number; that's derived from this signal in code, not "
+                "something you assign."
+            ),
+        },
+        "ships_from_source_url": {
+            "type": ["string", "null"],
+            "description": (
+                "The page you fetched that grounded ships_from_signal. "
+                "Required together with ships_from_signal — this is a "
+                "factual claim about a page, held to the same §4.3 "
+                "no-source-no-field standard as a spec value."
+            ),
+        },
+        "shipping_estimate_native": {
+            "type": ["number", "null"],
+            "description": (
+                "Only when you've confirmed this product ships from outside "
+                "the buyer's region — leave null otherwise. In the same "
+                "currency as price_currency."
+            ),
+        },
+        "duty_estimate_native": {
+            "type": ["number", "null"],
+            "description": "Same confirmed-cross-border-only rule as shipping_estimate_native.",
+        },
     },
     "required": ["sold_in_region"],
 }
@@ -317,13 +387,25 @@ def _validate_sourced_value(
 
 
 def build_product_from_args(
-    args: dict[str, Any], survey: SurveyReport, ledger: FetchLedger
+    args: dict[str, Any],
+    survey: SurveyReport,
+    ledger: FetchLedger,
+    location: Location,
+    low_evidence_mode: bool,
 ) -> tuple[Product | None, str | None]:
     """Validate `record_product`-shaped `args` and construct a `Product` —
-    every §4.3 ledger check, invariant 6's cons check, and the two-pass
-    evidence construction (§4.0d). See module docstring's "public,
-    reusable core" section for why this is a standalone function rather
-    than living inside the tool closure below.
+    every §4.3 ledger check, invariant 6's cons check, the two-pass
+    evidence construction (§4.0d), (build order step 11) the §10.6
+    ships_from ladder plus §10.3's landed-pricing gate, and (build order
+    step 12) §14's mode-gated community-source-for-specs rule plus §8.3's
+    confidence clamp. See module docstring's "public, reusable core"
+    section for why this is a standalone function rather than living inside
+    the tool closure below.
+
+    `location` is the run's resolved `Location` — needed to decide whether
+    a reported `ships_from` is actually confirmed cross-border (§10.2/§10.3).
+    `low_evidence_mode` gates whether a `community`-typed spec is admissible
+    at all (§14) and is threaded to `build_evidence_profile`'s §8.3 clamp.
 
     Returns `(product, None)` on success or `(None, error_text)` on
     failure, where `error_text` is the exact rejection message the
@@ -335,9 +417,21 @@ def build_product_from_args(
     bad_fields: list[str] = []
 
     # 1. specs — require a `fetched` ledger entry (§4.3: spec values
-    #    are facts, never judgment).
+    #    are facts, never judgment) AND, in standard mode, no `community`
+    #    source_type (§14: "Never admissible for: spec values" outside
+    #    low-evidence mode — the schema can't express this, so it's
+    #    checked here, in the same bad-fields pass as the ledger check).
     specs: dict[str, SourcedValue] = {}
     for spec_name, raw in args["specs"].items():
+        if not low_evidence_mode and raw.get("source_type") == "community":
+            bad_fields.append(
+                f"specs[{spec_name!r}].source_type is 'community', which is never "
+                "admissible for a spec value outside low-evidence mode (§14) — "
+                "drop this spec, cite a manufacturer/testing_outlet/aggregator/"
+                "retailer source instead, or move this claim to ownership_notes "
+                "if it's about reliability/longevity rather than a spec value."
+            )
+            continue
         sourced_value, error = _validate_sourced_value(
             raw, ledger, require_fetched=True, label=f"specs[{spec_name!r}]"
         )
@@ -372,6 +466,24 @@ def build_product_from_args(
         if not ledger.is_admissible(url, require_fetched=False):
             bad_fields.append(f"review_sources[{i}] {_ledger_rejection_reason(ledger, url)}")
 
+    # 4.5. ships_from_source_url — required together with ships_from_signal
+    #      (§10.6: a factual page claim, held to the specs' fetched-only
+    #      standard, not ownership_notes'/review_sources' looser one).
+    availability_raw = args["availability"]
+    ships_from_signal = availability_raw.get("ships_from_signal")
+    ships_from_source_url = availability_raw.get("ships_from_source_url")
+    if ships_from_signal is not None:
+        if not ships_from_source_url:
+            bad_fields.append(
+                "availability.ships_from_source_url is required when "
+                "ships_from_signal is set — cite the page that grounded it, "
+                "or omit both."
+            )
+        elif not ledger.is_admissible(ships_from_source_url, require_fetched=True):
+            bad_fields.append(
+                f"availability.ships_from_source_url {_ledger_rejection_reason(ledger, ships_from_source_url)}"
+            )
+
     if bad_fields:
         return None, (
             "record_product rejected — the following "
@@ -382,20 +494,35 @@ def build_product_from_args(
             "if you only searched, then call record_product again."
         )
 
-    # 5. pricing / availability. Availability deliberately minimal —
-    #    see module docstring.
+    # 5. pricing / availability — the §10.6 ladder and §10.3 landed-pricing
+    #    gate, both derived here rather than trusted from the model. See
+    #    module docstring.
     try:
         pricing = PricingModel(**pricing_raw)
     except ValidationError as e:
         return None, f"record_product rejected: pricing: {e}"
 
+    ships_from = availability_raw.get("ships_from")
+    resolved_signal = validate_ships_from_signal(ships_from_signal, ships_from_source_url)
+    confirmed_cross_border = is_confirmed_cross_border(ships_from, location.country)
+    shipping, duty, landed = resolve_landed_pricing(
+        pricing,
+        confirmed_cross_border,
+        availability_raw.get("shipping_estimate_native"),
+        availability_raw.get("duty_estimate_native"),
+    )
+
     availability = Availability(
-        sold_in_region=args["availability"]["sold_in_region"],
+        sold_in_region=availability_raw["sold_in_region"],
         regional_names=[],
-        ships_to_region=None,
-        ships_from=None,
-        ships_from_signal=None,
-        ships_from_confidence=0.0,  # never model-supplied; invariant 4
+        ships_to_region=availability_raw.get("ships_to_region"),
+        ships_from=ships_from,
+        ships_from_signal=resolved_signal,
+        ships_from_confidence=ships_from_confidence_for(resolved_signal),  # never
+        # model-supplied; invariant 4 — derived purely from resolved_signal
+        shipping_estimate_native=shipping,
+        duty_estimate_native=duty,
+        landed_price_native=landed,
         import_caveats=[],
     )
 
@@ -430,17 +557,26 @@ def build_product_from_args(
     #    (invariant 4). This is what makes independent_review_count and
     #    has_methodology_backed_source safe to drop from the schema
     #    entirely rather than accept-then-ignore.
-    evidence = build_evidence_profile(draft, survey)
+    evidence = build_evidence_profile(draft, survey, low_evidence_mode=low_evidence_mode)
     product = draft.model_copy(update={"evidence": evidence})
     return product, None
 
 
-def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLedger):
+def make_record_product(
+    sink: ProductSink,
+    survey: SurveyReport,
+    ledger: FetchLedger,
+    location: Location,
+    low_evidence_mode: bool,
+):
     """Factory mirroring `phases/refine.py`'s `Refiner`-seam-style
     dependency injection. `survey` is needed for
     `build_evidence_profile`'s `comparison_specs`/`category_kind` (§4.0d);
-    `ledger` is the §4.3 enforcement point — both are the *same* instances
-    the rest of a live run uses, per `hooks/ledger.py`'s "run-scoped, not
+    `ledger` is the §4.3 enforcement point; `location` (build order step 11)
+    is needed for the §10.3 confirmed-cross-border gate; `low_evidence_mode`
+    (build order step 12) gates §14's community-source-for-specs rule and
+    §8.3's confidence clamp — all four are the *same* instances/values the
+    rest of a live run uses, per `hooks/ledger.py`'s "run-scoped, not
     phase-scoped" requirement."""
 
     @tool(
@@ -454,7 +590,9 @@ def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLe
         RECORD_PRODUCT_SCHEMA,
     )
     async def record_product(args: dict[str, Any]) -> dict[str, Any]:
-        product, error_text = build_product_from_args(args, survey, ledger)
+        product, error_text = build_product_from_args(
+            args, survey, ledger, location, low_evidence_mode
+        )
         if product is None:
             return {"content": [{"type": "text", "text": error_text}], "is_error": True}
 

@@ -67,6 +67,7 @@ from pydantic import BaseModel
 
 from product_scout import config
 from product_scout.confidence import confidence_band
+from product_scout.degraded_modes import is_commodity_category
 from product_scout.models import (
     IntakeAnswers,
     Product,
@@ -274,6 +275,12 @@ every product below. Follow your recommendation-logic skill exactly.
 
 BUDGET: ceiling {budget_ceiling}, note: {budget_note}
 LOW-EVIDENCE MODE: {low_evidence_mode}
+COMMODITY CATEGORY: {commodity_category} ({differentiation} differentiation, \
+~{estimated_product_count} products found). When true, Phase 6a was not \
+re-prompted for archetype diversity here — if the write-up is about a \
+product from an undifferentiated set, say so plainly (§8.4: "these cluster \
+into effectively two real options, not six") rather than writing as if a \
+sharp distinction exists.
 
 TIMING SIGNAL:
 {timing_json}
@@ -330,6 +337,9 @@ class SdkSynthesizer:
             ),
             budget_note=intake.budget_note or "no note given",
             low_evidence_mode=low_evidence_mode,
+            commodity_category=is_commodity_category(survey),
+            differentiation=survey.differentiation,
+            estimated_product_count=survey.estimated_product_count,
             timing_json=json.dumps(timing.model_dump(mode="json")),
             all_scores_json=json.dumps(
                 [_score_summary(p, scores_by_name.get(p.name)) for p in products]

@@ -8,7 +8,7 @@ one on — re-judges the score at three discounted prices so a flip point can
 be interpolated. `tools=[]` (§3's own `PHASES` sample): this phase reasons
 over data the run record already holds; it does no further research.
 
-This module owns four things, mirroring `phases/refine.py`'s own shape
+This module owns five things, mirroring `phases/refine.py`'s own shape
 (seam / pure runtime logic / SDK adapter):
 
 1. `Scorer` — the seam through which the actual judgment call happens.
@@ -16,8 +16,12 @@ This module owns four things, mirroring `phases/refine.py`'s own shape
    functions, no I/O.
 3. `_demote_for_row_cap` — §5.1's prior-gen demotion rule, added build
    order step 10 once `phases/prior_gen.py` existed to make it fireable.
-4. `run_scoring` — the two-re-prompt-bound state machine built on top of
-   the seam, with the row-cap demotion applied once scoring settles.
+4. `_reassign_role_for_location` — §10.4's location-driven reference-role
+   rule, added build order step 11 once `location.assess_location_impact`
+   existed to make it computable.
+5. `run_scoring` — the two-re-prompt-bound state machine built on top of
+   the seam, with location reassignment and row-cap demotion both applied
+   once scoring settles.
 
 ### What "§5.1 constraints enforced in code" means in THIS build step
 ### (step 9) and what step 10 added
@@ -35,7 +39,14 @@ This module owns four things, mirroring `phases/refine.py`'s own shape
    soft target (8) / backfill-from-a-larger-pool machinery remains
    deferred** — see `_demote_for_row_cap`'s own docstring for exactly why
    that part still needs orchestrator-level candidate-pool decisions this
-   module has no visibility into.
+   module has no visibility into. §8.3's "table constraints scale down [in
+   low-evidence mode]... Low-evidence mode overrides the floor" (§5.1) is
+   consequently a no-op here too, checked at build order step 12: there is
+   no backfill-to-the-floor behavior anywhere in this codebase yet for
+   low-evidence mode to override — nothing pads a thin table up to 6 rows,
+   so there's nothing to suppress. This module only ever *removes* rows
+   (see `_demote_for_row_cap`'s own docstring), which already can't
+   conflict with a floor it never enforces.
 
 2. **The bulleted "Constraints, enforced in code after Opus returns" list**
    — every row has a con (already schema-guaranteed by `Product.cons`'s
@@ -95,6 +106,8 @@ from pydantic import BaseModel, Field
 
 from product_scout import config
 from product_scout.confidence import confidence_band, flip_point_eligible
+from product_scout.degraded_modes import is_commodity_category
+from product_scout.location import assess_location_impact
 from product_scout.models import (
     IntakeAnswers,
     Product,
@@ -217,13 +230,17 @@ def _round_number_issue(raw_scores: list[RawProductScore]) -> str | None:
     return None
 
 
-def _archetype_diversity_issue(
+def _diverse_archetype_shortfall(
     products_by_name: dict[str, Product], raw_scores: list[RawProductScore]
-) -> str | None:
-    """§5.1: 'At least 3 in-budget rows with distinct archetypes — when 3
-    qualifying products exist.' Reads `role`/`in_budget` from each raw
-    score's OWN proposed role (not the pre-scoring `Product.role`) — Opus's
-    role judgment is exactly what this constraint is checking."""
+) -> tuple[list[RawProductScore], set[str]] | None:
+    """Shared underlying check for `_archetype_diversity_issue` and
+    `_commodity_relaxation_caveat` (build order step 12) — both need to
+    know "would §5.1's 3-diverse-archetype constraint have failed here,"
+    they just do different things with a `True` answer (one re-prompts,
+    the other logs why it deliberately didn't). Returns `None` when the
+    constraint doesn't even bind (fewer than `MIN_DIVERSE_ARCHETYPE_ROWS`
+    qualifying products) or is satisfied; otherwise `(qualifying, distinct)`.
+    """
     qualifying = [
         r
         for r in raw_scores
@@ -233,17 +250,108 @@ def _archetype_diversity_issue(
         return None  # constraint only binds when enough candidates exist
     distinct = {r.strength_archetype for r in qualifying}
     if len(distinct) < MIN_DIVERSE_ARCHETYPE_ROWS:
-        names = ", ".join(sorted(r.product_name for r in qualifying))
-        return (
-            f"{len(qualifying)} in-budget products ({names}) only span "
-            f"{len(distinct)} distinct archetype(s) — §5.1 needs at least "
-            f"{MIN_DIVERSE_ARCHETYPE_ROWS} distinct archetypes among "
-            "in-budget recommendations when that many qualifying products "
-            "exist. Differentiate the narrative reason to prefer each one, "
-            "or explain plainly if this is genuinely a low-differentiation "
-            "commodity set (§8.4) rather than inventing a distinction."
-        )
+        return qualifying, distinct
     return None
+
+
+def _archetype_diversity_issue(
+    products_by_name: dict[str, Product],
+    raw_scores: list[RawProductScore],
+    commodity_category: bool,
+    low_evidence_mode: bool,
+) -> str | None:
+    """§5.1: 'At least 3 in-budget rows with distinct archetypes — when 3
+    qualifying products exist.' Reads `role`/`in_budget` from each raw
+    score's OWN proposed role (not the pre-scoring `Product.role`) — Opus's
+    role judgment is exactly what this constraint is checking.
+
+    Two independent reasons skip this constraint outright rather than
+    re-prompting — a run can be either, neither, or both, since they're
+    unrelated conditions (a commodity category can have rich coverage; a
+    low-evidence run need not be a commodity category):
+
+    §8.4 (build order step 10): 'When differentiation == "low" against a
+    large catalog, the archetype-diversity requirement relaxes rather than
+    manufacturing distinctions.' `commodity_category` — the run-level flag
+    `degraded_modes.is_commodity_category` computes from `SurveyReport`.
+
+    §8.3 (build order step 12): 'Table constraints scale down [in
+    low-evidence mode], every relaxation logged.' Re-prompting a
+    low-evidence run to "try harder" to find 3 distinct narrative reasons
+    is exactly the stacked-speculation problem low-evidence mode elsewhere
+    guards against (manufacturing distinctions from thin evidence is no
+    more honest than manufacturing a spec value would be). §8.3 doesn't
+    name which table constraints scale down; archetype-diversity is the
+    one this codebase can anchor to a spec-explicit precedent (§8.4's
+    parallel treatment) rather than inventing a new relaxation from
+    scratch — the row-floor/backfill machinery §5.1 also mentions
+    scaling down remains unbuilt regardless of mode (see
+    `_demote_for_row_cap`'s own docstring), so there's nothing else here
+    to relax yet.
+
+    See `_archetype_relaxation_caveat` for how "every relaxation logged"
+    (§8.3) / "Report says so" (§8.4) gets satisfied instead of the
+    re-prompt this used to trigger.
+    """
+    if commodity_category or low_evidence_mode:
+        return None
+    shortfall = _diverse_archetype_shortfall(products_by_name, raw_scores)
+    if shortfall is None:
+        return None
+    qualifying, distinct = shortfall
+    names = ", ".join(sorted(r.product_name for r in qualifying))
+    return (
+        f"{len(qualifying)} in-budget products ({names}) only span "
+        f"{len(distinct)} distinct archetype(s) — §5.1 needs at least "
+        f"{MIN_DIVERSE_ARCHETYPE_ROWS} distinct archetypes among "
+        "in-budget recommendations when that many qualifying products "
+        "exist. Differentiate the narrative reason to prefer each one, "
+        "or explain plainly if this is genuinely a low-differentiation "
+        "commodity set (§8.4) rather than inventing a distinction."
+    )
+
+
+def _archetype_relaxation_caveat(
+    products_by_name: dict[str, Product],
+    raw_scores: list[RawProductScore],
+    commodity_category: bool,
+    low_evidence_mode: bool,
+) -> str | None:
+    """§8.4: 'Report says so: "these cluster into effectively two real
+    options, not six."' §8.3: 'every relaxation logged.' Fires only when
+    the relaxation actually mattered — i.e. the diversity constraint would
+    have failed without it (reusing `_diverse_archetype_shortfall`, the
+    exact same check `_archetype_diversity_issue` skips) — so a commodity
+    or low-evidence run that happens to have genuinely diverse archetypes
+    anyway gets no gratuitous caveat (§5.5: 'a caveats section nobody
+    reads is worth the same as no caveats').
+
+    Both reasons are named when both apply (they're independent
+    conditions, not alternatives — see `_archetype_diversity_issue`) rather
+    than picking one arbitrarily; each is a true, disclosable fact about
+    the run regardless of the other.
+    """
+    if not (commodity_category or low_evidence_mode):
+        return None
+    shortfall = _diverse_archetype_shortfall(products_by_name, raw_scores)
+    if shortfall is None:
+        return None
+    _qualifying, distinct = shortfall
+    reasons = []
+    if commodity_category:
+        reasons.append(
+            "commodity category (§8.4): differentiation is low against a large catalog"
+        )
+    if low_evidence_mode:
+        reasons.append(
+            "low-evidence mode (§8.3): thin evidence doesn't support manufacturing "
+            "narrative distinctions between products"
+        )
+    return (
+        f"Archetype-diversity requirement relaxed — {'; '.join(reasons)} — "
+        f"these cluster into effectively {len(distinct)} real option(s), not a "
+        "distinct archetype per row."
+    )
 
 
 def _above_budget_standout_issue(
@@ -269,10 +377,17 @@ def _above_budget_standout_issue(
     )
 
 
-def _find_issues(products: list[Product], raw: RawScoring) -> list[str]:
+def _find_issues(
+    products: list[Product],
+    raw: RawScoring,
+    commodity_category: bool,
+    low_evidence_mode: bool,
+) -> list[str]:
     products_by_name = {p.name: p for p in products}
     issues = [
-        _archetype_diversity_issue(products_by_name, raw.scores),
+        _archetype_diversity_issue(
+            products_by_name, raw.scores, commodity_category, low_evidence_mode
+        ),
         _above_budget_standout_issue(products_by_name, raw.scores),
         _round_number_issue(raw.scores),
     ]
@@ -411,6 +526,55 @@ def _build_scored(
     return scores
 
 
+def _reassign_role_for_location(
+    products: list[Product], budget_ceiling: float | None
+) -> tuple[list[Product], list[str]]:
+    """§10.4: "Unavailable or prohibitively expensive products become
+    reference rows" — a computed fact, not Opus's discretion, the same
+    reasoning `_demote_for_row_cap` below already applies to the row-cap
+    rule. Runs on the products Opus already returned a `role` for (so it
+    can override a `"recommendation"` role Opus assigned without knowing
+    better), and never touches a row that's already a reference role for
+    some OTHER reason (baseline_current, or already reference_* from
+    Opus's own judgment) — there's nothing to correct there.
+
+    Not-sold-in-region -> `reference_unavailable` (§10.4's first trigger,
+    always unconditional). A material landed-price/budget trigger (the
+    other two) -> `reference_above_budget` — reusing that role rather than
+    inventing a new one, since to the buyer "landed price pushes this
+    outside your budget" reads the same as "this is priced above your
+    budget," just via a different route to the same number.
+    """
+    updated: list[Product] = []
+    caveats: list[str] = []
+    for product in products:
+        if product.role != "recommendation":
+            updated.append(product)
+            continue
+
+        impact = assess_location_impact(product, budget_ceiling)
+        if not impact.sold_in_region:
+            updated.append(product.model_copy(update={"role": "reference_unavailable"}))
+            caveats.append(
+                f'"{product.name}" demoted to a reference row (role=reference_unavailable) '
+                "— not sold in the buyer's region (§10.4)."
+            )
+        elif impact.exceeds_threshold or impact.pushes_outside_budget:
+            updated.append(product.model_copy(update={"role": "reference_above_budget"}))
+            reason = (
+                "landed price exceeds the native price by more than 15%"
+                if impact.exceeds_threshold
+                else "landed price pushes it outside the stated budget"
+            )
+            caveats.append(
+                f'"{product.name}" demoted to a reference row (role=reference_above_budget) '
+                f"— {reason} (§10.4)."
+            )
+        else:
+            updated.append(product)
+    return updated, caveats
+
+
 # §5.1: "hard stop at 12 rows." Only the hard cap + demotion half of §5.1's
 # row-width rule is enforced here — see `_demote_for_row_cap`'s docstring
 # for exactly what remains deferred and why.
@@ -482,13 +646,25 @@ async def run_scoring(
 ) -> ScoringOutcome:
     """Run Phase 6a end to end: score (one Opus call), check the §5.1/§5.2
     issues, re-prompt up to `SCORING_REPROMPT_MAX` times, accept whatever
-    the last attempt produced, then apply §5.1's row-cap demotion
-    (`_demote_for_row_cap`) — in that order, so demotion always sees the
-    FINAL scores rather than an attempt a re-prompt later replaced.
+    the last attempt produced, then apply §10.4's location-driven role
+    reassignment (`_reassign_role_for_location`) and §5.1's row-cap
+    demotion (`_demote_for_row_cap`) — in that order, so both always see
+    the FINAL scores rather than an attempt a re-prompt later replaced, and
+    so the row-cap's recommendation count only reflects genuine remaining
+    recommendation rows once location has already removed the ones §10.4
+    forces out.
 
     `low_evidence_mode` is threaded straight through to `_build_scored` —
     §5.2's flip-point suppression is unconditional and Python-owned, never
     something a re-prompt could talk Opus out of.
+
+    `commodity_category` (build order step 12, §8.4) is computed once here
+    via `degraded_modes.is_commodity_category(survey)` — a pure function of
+    `survey` alone, so every attempt in the re-prompt loop below sees the
+    identical value; see that module's docstring for why this is
+    recomputed rather than threaded in as its own parameter, unlike
+    `low_evidence_mode` (genuinely stateful, decided at SURVEY time by a
+    user's interrupt choice `survey` alone can't reconstruct).
 
     Short-circuits to an empty result without calling the scorer when
     `products` is empty — mirrors `run_extraction`'s "an empty shortlist
@@ -497,12 +673,14 @@ async def run_scoring(
     if not products:
         return ScoringOutcome(products=[], scores=[], caveats=[])
 
+    commodity_category = is_commodity_category(survey)
+
     feedback: str | None = None
     raw = RawScoring(scores=[])
     issues: list[str] = []
     for attempt in range(SCORING_REPROMPT_MAX + 1):
         raw = await scorer.propose_scores(products, survey, intake, topics, low_evidence_mode, feedback)
-        issues = _find_issues(products, raw)
+        issues = _find_issues(products, raw, commodity_category, low_evidence_mode)
         if not issues or attempt == SCORING_REPROMPT_MAX:
             break
         feedback = _format_feedback(issues)
@@ -512,7 +690,17 @@ async def run_scoring(
         for issue in issues
     ]
 
+    relaxation_caveat = _archetype_relaxation_caveat(
+        {p.name: p for p in products}, raw.scores, commodity_category, low_evidence_mode
+    )
+    if relaxation_caveat is not None:
+        caveats.append(relaxation_caveat)
+
     updated_products = _apply_raw_scores(products, raw)
+    updated_products, location_caveats = _reassign_role_for_location(
+        updated_products, intake.budget_ceiling
+    )
+    caveats.extend(location_caveats)
     scores = _build_scored(updated_products, raw, low_evidence_mode)
     updated_products, demotion_caveats = _demote_for_row_cap(updated_products, scores)
     caveats.extend(demotion_caveats)
@@ -555,13 +743,27 @@ def _parse_scoring_json(text: str) -> dict | None:
     return parsed
 
 
-def _product_summary(product: Product) -> dict:
+def _product_summary(product: Product, budget_ceiling: float | None) -> dict:
     """What Opus needs to score a product — deliberately not the full
     `Product` dump (specs carry `SourcedValue` provenance noise irrelevant
     to judgment; §4.0d's derived `EvidenceProfile` is summarized as a band,
     never handed over raw, since a model reasoning about its own confidence
     band is harmless but reasoning about raw ratios risks re-deriving a
-    number invariant 4 reserves for Python)."""
+    number invariant 4 reserves for Python).
+
+    `availability` (build order step 11, §10.4) is the same reasoning
+    applied to location: Opus sees the FACTS (`sold_in_region`, `ships_from`,
+    the computed threshold booleans) so its score/rationale can account for
+    them, but never a number it could re-derive itself — `impact` is built
+    by `location.assess_location_impact`, the same "derive it in Python,
+    hand over only the shape of the conclusion" pattern `confidence_band`
+    already uses one line below. Whether a product actually GETS demoted to
+    a reference role for this is decided by `_reassign_role_for_location`
+    after Opus responds, not by Opus's own `role` judgment — §10.4's
+    triggers are computed facts, the same reasoning `_demote_for_row_cap`
+    already applies to the row-cap rule.
+    """
+    impact = assess_location_impact(product, budget_ceiling)
     return {
         "name": product.name,
         "brand": product.brand,
@@ -577,6 +779,14 @@ def _product_summary(product: Product) -> dict:
             "total_cost_1yr": product.pricing.total_cost_1yr,
             "currency": product.pricing.price_currency,
         },
+        "availability": {
+            "sold_in_region": product.availability.sold_in_region,
+            "ships_from": product.availability.ships_from,
+            "landed_price_native": product.availability.landed_price_native,
+            "landed_price_exceeds_15pct": impact.exceeds_threshold,
+            "landed_price_pushes_outside_budget": impact.pushes_outside_budget,
+            "tax_convention_undetermined": impact.tax_convention_undetermined,
+        },
         "specs": {k: v.value for k, v in product.specs.items()},
         "pros": product.pros,
         "cons": product.cons,
@@ -590,11 +800,28 @@ products (category kind: {category_kind}) for a buyer. Score holistically \
 exactly.
 
 BUDGET: ceiling {budget_ceiling}, note: {budget_note}
-LOW-EVIDENCE MODE: {low_evidence_mode}
+LOW-EVIDENCE MODE: {low_evidence_mode}. When true, you will NOT be \
+re-prompted for archetype diversity either (§8.3: table constraints scale \
+down) — thin evidence doesn't support manufacturing narrative distinctions, \
+so if the products genuinely don't differentiate, say so plainly rather \
+than inventing distinct archetypes.
+COMMODITY CATEGORY: {commodity_category} ({differentiation} differentiation, \
+~{estimated_product_count} products found). When true, you will NOT be \
+re-prompted for archetype diversity either — §8.4 treats a low-differentiation \
+set as a real finding, not a gap to fix, so say so plainly yourself \
+(e.g. "these cluster into effectively two real options, not six") rather \
+than inventing distinct archetypes to manufacture separation.
 
 BUYER'S ANSWERS (gates already filtered products; axes are soft weights, \
 never filters):
 {topics_json}
+
+Each product's `availability` block tells you what's already been \
+determined about location (§10.4) — whether it's sold in the buyer's \
+region, and whether a landed price materially exceeds the native price or \
+the stated budget. Factor this into score and rationale like any other \
+fact; whether a product actually gets demoted to a reference role for it \
+is decided in code after you respond, not by your own role judgment alone.
 
 PRODUCTS:
 {products_json}
@@ -642,6 +869,9 @@ class SdkScorer:
             budget_ceiling=intake.budget_ceiling if intake.budget_ceiling is not None else "none stated",
             budget_note=intake.budget_note or "no note given",
             low_evidence_mode=low_evidence_mode,
+            commodity_category=is_commodity_category(survey),
+            differentiation=survey.differentiation,
+            estimated_product_count=survey.estimated_product_count,
             topics_json=json.dumps(
                 [
                     {
@@ -654,7 +884,9 @@ class SdkScorer:
                     for t in topics
                 ]
             ),
-            products_json=json.dumps([_product_summary(p) for p in products]),
+            products_json=json.dumps(
+                [_product_summary(p, intake.budget_ceiling) for p in products]
+            ),
             feedback_block=(feedback + "\n\n") if feedback else "",
             schema=json.dumps(RawScoring.model_json_schema()),
         )

@@ -83,16 +83,17 @@ step's authority. `SurveyReport.secondhand_risk_factors` (already built,
 Phase 1) and its own collapsed report section remain the only used/
 secondhand-adjacent content this pipeline currently carries.
 
-### Not threaded through: `low_evidence_mode`
+### `low_evidence_mode` (build order step 12)
 
-Neither this phase's prompt nor its signature mentions `low_evidence_mode`
-— `research-protocol`'s own skill content is explicitly conditional on
-"when told a run is in low-evidence mode," but nothing here tells it.
-This is an inherited gap, not one introduced here: `phases/extraction.py`
-(build order step 8) has the identical gap in `EXTRACTION_PROMPT_TEMPLATE`
-today. Flagging it rather than silently repeating it — whichever step
-wires an orchestrator should thread `low_evidence_mode` into every Haiku
-research phase's prompt at once, not patch them one at a time.
+Closed the gap this module's docstring used to flag here: neither the
+prompt nor the signature mentioned `low_evidence_mode`, even though
+`research-protocol`'s own skill content is explicitly conditional on "when
+told a run is in low-evidence mode." `research`/`run_prior_gen`/
+`_admit_finding` all take it now, threaded to `PRIOR_GEN_PROMPT_TEMPLATE`
+and to `build_product_from_args`'s §14/§8.3 mode-gated checks — the same
+treatment `phases/extraction.py` got in the same build step, closing both
+gaps together rather than patching them one at a time, exactly as this
+note used to say a future step should.
 
 ### §12.1's conditional-section rule and §12.6's omit/disclose split
 
@@ -120,7 +121,7 @@ from pydantic import BaseModel
 
 from product_scout import config
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
-from product_scout.models import Product, SurveyReport
+from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
 from product_scout.tools.record_product import RECORD_PRODUCT_SCHEMA, build_product_from_args
 
@@ -188,7 +189,9 @@ class RawPriorGen(BaseModel):
 class PriorGenResearcher(Protocol):
     """Seam for Phase 5's actual research call."""
 
-    async def research(self, seeds: list[Product], ledger: FetchLedger) -> RawPriorGen: ...
+    async def research(
+        self, seeds: list[Product], ledger: FetchLedger, low_evidence_mode: bool
+    ) -> RawPriorGen: ...
 
 
 class PriorGenOutcome(BaseModel):
@@ -201,6 +204,8 @@ def _admit_finding(
     seeds_by_name: dict[str, Product],
     survey: SurveyReport,
     ledger: FetchLedger,
+    location: Location,
+    low_evidence_mode: bool,
 ) -> tuple[Product | None, str | None]:
     """§12.1/§12.6, applied per finding. See module docstring's
     "conditional-section rule" section for the omit/disclose split this
@@ -230,7 +235,9 @@ def _admit_finding(
     args["role"] = "recommendation"  # §12.3: "it enters as a first-class row"
 
     try:
-        product, error_text = build_product_from_args(args, survey, ledger)
+        product, error_text = build_product_from_args(
+            args, survey, ledger, location, low_evidence_mode
+        )
     except (KeyError, TypeError) as e:
         # No live tool boundary schema-validated this dict before it got
         # here (see module docstring) — a malformed `product` object is a
@@ -253,6 +260,8 @@ async def run_prior_gen(
     seeds: list[Product],
     survey: SurveyReport,
     ledger: FetchLedger,
+    location: Location,
+    low_evidence_mode: bool,
     researcher: PriorGenResearcher,
 ) -> PriorGenOutcome:
     """Run Phase 5 end to end: research every current-gen seed in one
@@ -266,18 +275,28 @@ async def run_prior_gen(
     Short-circuits without calling the researcher when there are no
     current-gen seeds — mirrors `run_extraction`/`run_scoring`'s "nothing
     to reason about, don't spend a call" precedent.
+
+    `location` (build order step 11) is threaded straight through to
+    `_admit_finding`/`build_product_from_args` — the same §10.3
+    confirmed-cross-border gate EXTRACTION applies. `low_evidence_mode`
+    (build order step 12) is threaded the same way, to both the prompt and
+    §14/§8.3's mode-gated `record_product` checks — the exact gap this
+    module's own docstring flagged as "an inherited gap, not one introduced
+    here" is what this closes.
     """
     current_gen_seeds = [p for p in seeds if p.generation == "current"]
     if not current_gen_seeds:
         return PriorGenOutcome(products=[], caveats=[])
 
-    raw = await researcher.research(current_gen_seeds, ledger)
+    raw = await researcher.research(current_gen_seeds, ledger, low_evidence_mode)
     seeds_by_name = {p.name: p for p in current_gen_seeds}
 
     products: list[Product] = []
     caveats: list[str] = []
     for finding in raw.findings:
-        product, caveat = _admit_finding(finding, seeds_by_name, survey, ledger)
+        product, caveat = _admit_finding(
+            finding, seeds_by_name, survey, ledger, location, low_evidence_mode
+        )
         if product is not None:
             products.append(product)
         if caveat is not None:
@@ -361,6 +380,13 @@ inventing a source for it.
 Budget yourself to roughly {max_searches} searches across all products \
 combined.
 
+LOW-EVIDENCE MODE: {low_evidence_mode}. When true, follow your research \
+protocol skill's low-evidence-mode section exactly — community sources and \
+unverified manufacturer performance claims become admissible (labeled as \
+such), and every relaxation you make must be something the report can name \
+explicitly. When false, a community source is never admissible as a \
+spec's source_type — record_product rejects it.
+
 A fetch or search failure is routine, not exceptional — report what you \
 couldn't reach and move on; don't retry the same query and don't route \
 around a failure through another method.
@@ -379,7 +405,9 @@ class SdkPriorGenResearcher:
     def __init__(self, model: str = config.MODEL_HAIKU) -> None:
         self._model = model
 
-    async def research(self, seeds: list[Product], ledger: FetchLedger) -> RawPriorGen:
+    async def research(
+        self, seeds: list[Product], ledger: FetchLedger, low_evidence_mode: bool
+    ) -> RawPriorGen:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
         assert_skill_loaded(config.RESEARCH_PROTOCOL_SKILL)
@@ -387,6 +415,7 @@ class SdkPriorGenResearcher:
         prompt = PRIOR_GEN_PROMPT_TEMPLATE.format(
             seed_json=json.dumps([_seed_summary(p) for p in seeds]),
             max_searches=config.MAX_PRIOR_GEN_SEARCHES,
+            low_evidence_mode=low_evidence_mode,
             schema=json.dumps(PRIOR_GEN_RESPONSE_SCHEMA),
         )
         options = ClaudeAgentOptions(

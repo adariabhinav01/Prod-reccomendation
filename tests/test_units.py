@@ -1,7 +1,14 @@
 """Unit tests for render/units.py — unit conversion at render (§10.5,
-build order step 6)."""
+build order step 6), plus country -> units derivation (§0/§10.1, build
+order step 11)."""
 
-from product_scout.render.units import _leading_number, convert_display_value
+import pytest
+
+from product_scout.render.units import (
+    _leading_number,
+    convert_display_value,
+    derive_units_from_country,
+)
 
 
 # -- _leading_number -----------------------------------------------------
@@ -75,3 +82,16 @@ def test_unparseable_value_with_known_unit_unchanged():
     # number — nothing to convert, so it passes through unchanged rather
     # than raising.
     assert convert_display_value("approx. lb", "lb", "metric") == "approx. lb"
+
+
+# -- derive_units_from_country (§0/§10.1, build order step 11) --------------
+
+
+@pytest.mark.parametrize("country", ["US", "LR", "MM", "us", " us "])
+def test_derive_units_imperial_countries(country):
+    assert derive_units_from_country(country) == "imperial"
+
+
+@pytest.mark.parametrize("country", ["DE", "GB", "FR", "JP", "CA", "AU"])
+def test_derive_units_metric_everywhere_else(country):
+    assert derive_units_from_country(country) == "metric"

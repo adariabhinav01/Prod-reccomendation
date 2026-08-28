@@ -14,6 +14,33 @@ dimensions. This module owns three things:
 3. `run_survey` — the §8.1a coverage gate / broadening interrupt / one-shot
    latch state machine, built on top of the seam.
 
+### `_repair_comparison_specs` — a real, reproducible gap found by build
+### order step 12's live verification, not a hypothetical
+
+Step 12's own §17.2 task ("low-evidence mode tested against a genuinely
+obscure category") ran `SdkSurveyor.survey()` live, four times, against two
+real obscure categories. Three of the four responses had Haiku emit a
+`dimensions` list containing a name it then forgot to also list in
+`comparison_specs` — §4.0b's own validator ("must contain every
+`Dimension.name`") correctly rejected all three as a bare `ValidationError`,
+which `SdkSurveyor.survey()` had no recovery from at all: the whole phase
+crashed. A 75%-in-practice failure rate on a real, unmocked call is not a
+hypothetical edge case.
+
+The fix is a Python-side repair, not a re-prompt: `comparison_specs` being
+required to be a superset of `Dimension.name` is a mechanical consistency
+rule, not a judgment call, so there is nothing to ask the model to
+reconsider — `Dimension.name` is by definition something the model
+intended as a real comparable axis (`Dimension`'s own docstring: "drives
+§9.7's stopping condition"), so unioning missing names into
+`comparison_specs` is the faithful reading of what the model meant, not a
+guess. `_repair_comparison_specs` does exactly that, on the raw dict,
+*before* `SurveyReport(**parsed)` ever runs — proactively, not inside a
+try/except, since the fix is idempotent and free when nothing needs it.
+Logged as a caveat when it actually fires (`RawSurvey.caveats`), never
+silent — matching this module's own "degrade explicitly" precedent
+(`_verify_exemplars`/`_validate_secondhand_risk_factors`).
+
 ### This module adapts `phases/probe.py`, and deliberately does NOT copy two
 ### of its patterns
 
@@ -227,10 +254,17 @@ class RawSurvey(BaseModel):
     `SurveyReport` plus the `evidence_pool` — search-snippet/fetched-page
     text collected during that same call. Bundled together because
     `_verify_exemplars` needs both, and the evidence is gone once the call
-    that produced it returns."""
+    that produced it returns.
+
+    `caveats` (build order step 12) carries anything a `Surveyor`
+    implementation had to correct before `SurveyReport` could even be
+    constructed — currently just `_repair_comparison_specs`'s output, for
+    `SdkSurveyor`. Empty for `FakeSurveyor`-style test doubles, which hand
+    back an already-valid `SurveyReport` with nothing to repair."""
 
     report: SurveyReport
     evidence_pool: list[str] = []
+    caveats: list[str] = []
 
 
 @runtime_checkable
@@ -327,6 +361,58 @@ def _apply_ledger_constraint(
     if verified_factors != report.secondhand_risk_factors:
         report = report.model_copy(update={"secondhand_risk_factors": verified_factors})
     return report, caveats
+
+
+def _repair_comparison_specs(parsed: dict) -> tuple[dict, list[str]]:
+    """§4.0b, enforced proactively rather than reactively (build order step
+    12 — see module docstring's "found by live verification" section).
+    Operates on the RAW dict, before `SurveyReport(**parsed)` runs, so a
+    Haiku response that forgot to list a `Dimension.name` in
+    `comparison_specs` gets fixed rather than crashing the whole phase.
+
+    Pure and defensive: only touches `parsed["comparison_specs"]` when
+    `parsed["dimensions"]` is a well-formed list of dicts with a string
+    `"name"` — anything else (a missing/malformed `dimensions`, a
+    malformed `comparison_specs`) is left untouched, on the theory that
+    this function's job is fixing ONE specific, well-understood mismatch,
+    not sanitizing arbitrary malformed model output; a genuinely broken
+    response should still fail loudly at `SurveyReport(**parsed)` (house
+    style: validate hard, fail loudly), not be silently coerced into
+    something that happens to validate.
+
+    Returns `(possibly-updated parsed dict, caveats)` — a new dict, never
+    mutates the input; `caveats` is empty when nothing needed repairing.
+    """
+    dimensions = parsed.get("dimensions")
+    if not isinstance(dimensions, list):
+        return parsed, []
+
+    dimension_names = [
+        d["name"]
+        for d in dimensions
+        if isinstance(d, dict) and isinstance(d.get("name"), str) and d["name"]
+    ]
+    if not dimension_names:
+        return parsed, []
+
+    comparison_specs = parsed.get("comparison_specs")
+    if not isinstance(comparison_specs, list):
+        return parsed, []
+
+    missing = [name for name in dimension_names if name not in comparison_specs]
+    if not missing:
+        return parsed, []
+
+    repaired = dict(parsed)
+    repaired["comparison_specs"] = [*comparison_specs, *missing]
+    caveat = (
+        f"comparison_specs was missing {missing!r} even though each is a "
+        "Dimension.name (§4.0b requires comparison_specs to be a superset) "
+        "— added automatically rather than failing the phase; the model's "
+        "own dimension naming is trusted here since there is nothing "
+        "genuinely ambiguous to re-ask about."
+    )
+    return repaired, [caveat]
 
 
 class SurveyOutcome(BaseModel):
@@ -456,6 +542,7 @@ async def run_survey(
 
     while True:
         raw = await surveyor.survey(current_type, location, ledger)
+        caveats.extend(raw.caveats)  # e.g. _repair_comparison_specs (step 12)
         report, verify_caveats = _apply_exemplar_constraint(
             raw.report, raw.evidence_pool
         )
@@ -651,5 +738,6 @@ class SdkSurveyor:
                 f"parseable SurveyReport JSON object: {final_text!r}"
             )
 
+        parsed, repair_caveats = _repair_comparison_specs(parsed)
         report = SurveyReport(**parsed)
-        return RawSurvey(report=report, evidence_pool=evidence_pool)
+        return RawSurvey(report=report, evidence_pool=evidence_pool, caveats=repair_caveats)

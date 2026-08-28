@@ -22,11 +22,21 @@ has been removed.)
 "Asked once in Phase 0 if missing, written back, reused silently." This
 phase checks `settings.load(...).location.has_location` first; if already
 set, it's reused silently and nothing is asked. If missing, both country and
-currency are asked (the spec gives no country -> currency derivation rule —
-only *units* are stated as derived, and CLAUDE.md's build order defers both
-units derivation and the rest of location handling to a separate step, "11.
-Location end to end" — out of scope here) and written back via
-`settings.set_value`/`settings.save`.
+currency are asked (the spec gives no country -> currency derivation rule)
+and written back via `settings.set_value`/`settings.save`.
+
+### Units derivation (§0/§10.1, build order step 11)
+
+"Units: derived from location on first run, overridable." `_ask_location`
+also resolves `settings.display.units`: if it's already set (a prior run
+derived it, or the user overrode it via `scout config set display.units`),
+it's left alone and reused silently, exactly like country/currency above. If
+it's still `None` — the "not yet derived" state `settings.py`'s
+`DisplaySettings` docstring describes — `render.units.derive_units_from_country`
+resolves it from the (possibly just-asked) country and it's written back the
+same way. This runs even when country/currency were already set and nothing
+was asked this run, since an existing config predating this build step can
+have a location with `units` still `None`.
 
 ### Upgrade baseline (§7.2)
 
@@ -56,9 +66,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Literal
 
 from product_scout.io.port import QuestionPort
 from product_scout.models import IntakeAnswers, Location, Product
+from product_scout.render.units import derive_units_from_country
 from product_scout.settings import load, save, set_value
 
 _YES_TOKENS = frozenset(("y", "yes"))
@@ -122,31 +134,42 @@ async def _ask_nonblank(port: QuestionPort, prompt: str) -> str:
         prompt = f"That can't be blank — {prompt[0].lower()}{prompt[1:]}"
 
 
-async def _ask_location(port: QuestionPort, settings_path: Path | str | None) -> Location:
+async def _ask_location(
+    port: QuestionPort, settings_path: Path | str | None
+) -> tuple[Location, Literal["imperial", "metric"]]:
     """§7.1 item 5 / §10.1: asked once if missing, written back, reused
     silently. No country -> currency derivation is attempted (see module
-    docstring) — both are asked explicitly when missing."""
+    docstring) — both are asked explicitly when missing. Also resolves
+    `display.units` (§0/§10.1, build order step 11) — see module docstring's
+    "Units derivation" section for why this runs on every call, not just the
+    branch that actually asked a question."""
     settings = load(settings_path)
     if settings.location.has_location:
-        return Location(
+        location = Location(
             country=settings.location.country,
             currency=settings.location.currency,
         )
+    else:
+        country = (
+            await _ask_nonblank(port, "What country are you shopping from? (e.g. US, DE, GB)")
+        ).upper()
+        currency = (
+            await _ask_nonblank(
+                port, "What currency should prices be shown in? (e.g. USD, EUR, GBP)"
+            )
+        ).upper()
 
-    country = (
-        await _ask_nonblank(port, "What country are you shopping from? (e.g. US, DE, GB)")
-    ).upper()
-    currency = (
-        await _ask_nonblank(
-            port, "What currency should prices be shown in? (e.g. USD, EUR, GBP)"
-        )
-    ).upper()
+        settings = set_value(settings, "location.country", country)
+        settings = set_value(settings, "location.currency", currency)
+        location = Location(country=country, currency=currency)
 
-    updated = set_value(settings, "location.country", country)
-    updated = set_value(updated, "location.currency", currency)
-    save(updated, settings_path)
+    units = settings.display.units
+    if units is None:
+        units = derive_units_from_country(location.country)
+        settings = set_value(settings, "display.units", units)
 
-    return Location(country=country, currency=currency)
+    save(settings, settings_path)
+    return location, units
 
 
 async def run_intake(
@@ -154,10 +177,11 @@ async def run_intake(
     port: QuestionPort,
     *,
     settings_path: Path | str | None = None,
-) -> tuple[IntakeAnswers, Location]:
+) -> tuple[IntakeAnswers, Location, Literal["imperial", "metric"]]:
     """Ask the five §7.1 questions, in order, and return the validated
     result plus the resolved `Location` (a separate top-level `RunRecord`
-    field, not nested under `intake`)."""
+    field, not nested under `intake`) and `units` (also a separate top-level
+    `RunRecord` field, §10.1/build order step 11)."""
     # 1. Ownership (§7 item 1) — gates KEEP_CURRENT downstream (§6.2, step 7).
     owns_current_version = await _ask_yes_no(
         port, f"Do you already own a {product_type}? (yes/no)"
@@ -187,7 +211,8 @@ async def run_intake(
     candidates_under_consideration = _parse_list(candidates_raw)
 
     # 5. Location (§7 item 5 / §10.1) — only if not already in settings.
-    location = await _ask_location(port, settings_path)
+    # Also resolves `units` (build order step 11 — see module docstring).
+    location, units = await _ask_location(port, settings_path)
 
     intake = IntakeAnswers(
         owns_current_version=owns_current_version,
@@ -197,7 +222,7 @@ async def run_intake(
         required_features=required_features,
         candidates_under_consideration=candidates_under_consideration,
     )
-    return intake, location
+    return intake, location, units
 
 
 def filter_by_required_features(

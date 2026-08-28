@@ -49,6 +49,7 @@ from pathlib import Path
 from string import Template
 
 from product_scout.confidence import confidence_band, flip_point_eligible
+from product_scout.location import SHIPS_FROM_UNCERTAIN_THRESHOLD
 from product_scout.models import Caveat, Product, RunRecord, Scored
 from product_scout.render.scale import build_scale_rows, format_price, render_scale_svg
 from product_scout.render.units import convert_display_value
@@ -326,7 +327,30 @@ def _render_availability_section(run: RunRecord) -> str:
         if a.ships_to_region is not None:
             bits.append(f"ships to region: {'yes' if a.ships_to_region else 'no'}")
         if a.ships_from:
-            bits.append(f"ships from: {_esc(a.ships_from)} (signal: {a.ships_from_signal}, confidence {a.ships_from_confidence:.2f})")
+            # §10.6: "Below 0.95, present the inference and mark it
+            # uncertain. Only an explicit policy statement clears the
+            # threshold" — said in words here, not just left to the raw
+            # number, since a reader shouldn't have to know the threshold
+            # to notice it wasn't cleared.
+            certainty = (
+                "confirmed"
+                if a.ships_from_confidence >= SHIPS_FROM_UNCERTAIN_THRESHOLD
+                else "uncertain"
+            )
+            bits.append(
+                f"ships from: {_esc(a.ships_from)} ({certainty} — signal: "
+                f"{a.ships_from_signal}, confidence {a.ships_from_confidence:.2f})"
+            )
+        if a.shipping_estimate_native is not None:
+            bits.append(
+                f"estimated shipping: {a.shipping_estimate_native:,.2f} "
+                f"{product.pricing.price_currency} (estimate)"
+            )
+        if a.duty_estimate_native is not None:
+            bits.append(
+                f"estimated duty: {a.duty_estimate_native:,.2f} "
+                f"{product.pricing.price_currency} (estimate)"
+            )
         if a.landed_price_native is not None:
             bits.append(f"landed price: {a.landed_price_native:,.2f} {product.pricing.price_currency} (estimate)")
         for note in a.import_caveats:

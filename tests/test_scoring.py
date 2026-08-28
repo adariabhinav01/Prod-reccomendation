@@ -17,15 +17,18 @@ from product_scout.phases.scoring import (
     _above_budget_standout_issue,
     _apply_raw_scores,
     _archetype_diversity_issue,
+    _archetype_relaxation_caveat,
     _compute_flip_point,
     _demote_for_row_cap,
     _find_issues,
     _is_round_number,
+    _reassign_role_for_location,
     _round_number_issue,
     _top_pick_score,
     run_scoring,
 )
 from tests.conftest import (
+    make_availability,
     make_evidence_profile,
     make_intake_answers,
     make_pricing_model,
@@ -114,7 +117,7 @@ def test_archetype_diversity_ok_when_fewer_than_min_qualify():
     ]
     # Only 2 qualifying in-budget recommendation rows exist — the "when 3
     # qualifying products exist" clause never binds.
-    assert _archetype_diversity_issue(products_by_name, raw) is None
+    assert _archetype_diversity_issue(products_by_name, raw, False, False) is None
 
 
 def test_archetype_diversity_flags_undifferentiated_set():
@@ -125,7 +128,7 @@ def test_archetype_diversity_flags_undifferentiated_set():
         _raw_score(product_name=n, role="recommendation", strength_archetype="value")
         for n in ("A", "B", "C")
     ]
-    issue = _archetype_diversity_issue(products_by_name, raw)
+    issue = _archetype_diversity_issue(products_by_name, raw, False, False)
     assert issue is not None
     assert "1 distinct archetype" in issue
 
@@ -139,7 +142,7 @@ def test_archetype_diversity_ok_when_distinct():
         _raw_score(product_name="B", role="recommendation", strength_archetype="durability"),
         _raw_score(product_name="C", role="recommendation", strength_archetype="aesthetic"),
     ]
-    assert _archetype_diversity_issue(products_by_name, raw) is None
+    assert _archetype_diversity_issue(products_by_name, raw, False, False) is None
 
 
 def test_archetype_diversity_ignores_out_of_budget_rows():
@@ -154,7 +157,87 @@ def test_archetype_diversity_ignores_out_of_budget_rows():
         _raw_score(product_name="C", role="recommendation", strength_archetype="performance"),
     ]
     # Only A and B are in-budget — 2 qualifying rows, below the floor of 3.
-    assert _archetype_diversity_issue(products_by_name, raw) is None
+    assert _archetype_diversity_issue(products_by_name, raw, False, False) is None
+
+
+# -- §8.4 commodity / §8.3 low-evidence archetype relaxation (build order step 12) --
+
+
+def _undifferentiated_setup():
+    products_by_name = {
+        name: make_product(name=name, in_budget=True) for name in ("A", "B", "C")
+    }
+    raw = [
+        _raw_score(product_name=n, role="recommendation", strength_archetype="value")
+        for n in ("A", "B", "C")
+    ]
+    return products_by_name, raw
+
+
+def test_archetype_diversity_issue_skipped_in_commodity_category():
+    """§8.4: the requirement relaxes — a commodity run is never re-prompted
+    for this, unlike the identical undifferentiated set in standard mode
+    (test_archetype_diversity_flags_undifferentiated_set above)."""
+    products_by_name, raw = _undifferentiated_setup()
+    assert _archetype_diversity_issue(products_by_name, raw, True, False) is None
+
+
+def test_archetype_diversity_issue_skipped_in_low_evidence_mode():
+    """§8.3: 'Table constraints scale down [in low-evidence mode].' A
+    low-evidence run is never re-prompted for this either — independent of
+    commodity_category, which is False here."""
+    products_by_name, raw = _undifferentiated_setup()
+    assert _archetype_diversity_issue(products_by_name, raw, False, True) is None
+
+
+def test_archetype_diversity_issue_still_fires_when_neither_applies():
+    products_by_name, raw = _undifferentiated_setup()
+    assert _archetype_diversity_issue(products_by_name, raw, False, False) is not None
+
+
+def test_archetype_relaxation_caveat_fires_for_commodity():
+    products_by_name, raw = _undifferentiated_setup()
+    caveat = _archetype_relaxation_caveat(products_by_name, raw, True, False)
+    assert caveat is not None
+    assert "§8.4" in caveat
+    assert "§8.3" not in caveat
+    assert "1 real option" in caveat  # all three share strength_archetype="value"
+
+
+def test_archetype_relaxation_caveat_fires_for_low_evidence_mode():
+    products_by_name, raw = _undifferentiated_setup()
+    caveat = _archetype_relaxation_caveat(products_by_name, raw, False, True)
+    assert caveat is not None
+    assert "§8.3" in caveat
+    assert "§8.4" not in caveat
+
+
+def test_archetype_relaxation_caveat_names_both_reasons_when_both_apply():
+    products_by_name, raw = _undifferentiated_setup()
+    caveat = _archetype_relaxation_caveat(products_by_name, raw, True, True)
+    assert caveat is not None
+    assert "§8.4" in caveat
+    assert "§8.3" in caveat
+
+
+def test_archetype_relaxation_caveat_silent_when_neither_applies():
+    products_by_name, raw = _undifferentiated_setup()
+    assert _archetype_relaxation_caveat(products_by_name, raw, False, False) is None
+
+
+def test_archetype_relaxation_caveat_silent_when_diversity_already_satisfied():
+    """No gratuitous caveat when the constraint wouldn't have failed
+    anyway — §5.5: 'a caveats section nobody reads is worth the same as no
+    caveats.'"""
+    products_by_name = {
+        name: make_product(name=name, in_budget=True) for name in ("A", "B", "C")
+    }
+    raw = [
+        _raw_score(product_name="A", role="recommendation", strength_archetype="value"),
+        _raw_score(product_name="B", role="recommendation", strength_archetype="durability"),
+        _raw_score(product_name="C", role="recommendation", strength_archetype="aesthetic"),
+    ]
+    assert _archetype_relaxation_caveat(products_by_name, raw, True, True) is None
 
 
 # -- _above_budget_standout_issue ---------------------------------------------
@@ -198,7 +281,7 @@ def test_above_budget_standout_ok_when_one_kept():
 def test_find_issues_empty_when_all_constraints_met():
     products = [make_product(name="A", in_budget=True)]
     raw = RawScoring(scores=[_raw_score(product_name="A", score=6.3)])
-    assert _find_issues(products, raw) == []
+    assert _find_issues(products, raw, False, False) == []
 
 
 # -- flip point interpolation --------------------------------------------
@@ -369,6 +452,70 @@ def test_apply_raw_scores_leaves_unscored_products_untouched():
     assert updated == [original]
 
 
+# -- _reassign_role_for_location (§10.4, build order step 11) ---------------
+
+
+def test_reassign_role_for_location_noop_when_nothing_material():
+    product = make_product(name="Widget Pro", role="recommendation")
+    updated, caveats = _reassign_role_for_location([product], budget_ceiling=None)
+    assert updated == [product]
+    assert caveats == []
+
+
+def test_reassign_role_for_location_demotes_unavailable_product():
+    product = make_product(
+        name="Widget Pro",
+        role="recommendation",
+        availability=make_availability(sold_in_region=False),
+    )
+    updated, caveats = _reassign_role_for_location([product], budget_ceiling=None)
+    assert updated[0].role == "reference_unavailable"
+    assert len(caveats) == 1
+    assert "Widget Pro" in caveats[0]
+    assert "reference_unavailable" in caveats[0]
+
+
+def test_reassign_role_for_location_demotes_landed_price_over_threshold():
+    product = make_product(
+        name="Widget Pro",
+        role="recommendation",
+        pricing=make_pricing_model(upfront_amount=100.0, price_tax_inclusive=True),
+        availability=make_availability(
+            sold_in_region=True, ships_from="DE", ships_from_confidence=0.98,
+            landed_price_native=120.0,  # +20%, over the 15% threshold
+        ),
+    )
+    updated, caveats = _reassign_role_for_location([product], budget_ceiling=None)
+    assert updated[0].role == "reference_above_budget"
+    assert "more than 15%" in caveats[0]
+
+
+def test_reassign_role_for_location_demotes_landed_price_over_budget():
+    product = make_product(
+        name="Widget Pro",
+        role="recommendation",
+        pricing=make_pricing_model(upfront_amount=100.0, price_tax_inclusive=True),
+        availability=make_availability(
+            sold_in_region=True, ships_from="DE", ships_from_confidence=0.98,
+            landed_price_native=105.0,
+        ),
+    )
+    updated, caveats = _reassign_role_for_location([product], budget_ceiling=100.0)
+    assert updated[0].role == "reference_above_budget"
+    assert "budget" in caveats[0]
+
+
+def test_reassign_role_for_location_never_touches_non_recommendation_rows():
+    product = make_product(
+        name="Baseline",
+        role="baseline_current",
+        availability=make_availability(sold_in_region=False),
+    )
+    updated, caveats = _reassign_role_for_location([product], budget_ceiling=None)
+    assert updated[0].role == "baseline_current"  # untouched
+    assert caveats == []
+
+
 # -- _demote_for_row_cap (§5.1, build order step 10) -------------------------
 
 
@@ -534,6 +681,58 @@ def test_run_scoring_reprompts_then_accepts_and_logs_unmet_constraint():
     assert any("archetype" in c for c in outcome.caveats)
 
 
+def test_run_scoring_skips_reprompt_and_logs_relaxation_in_commodity_category():
+    """§8.4 end to end: the same undifferentiated-set scoring response that
+    triggers a re-prompt above must NOT re-prompt here, and the caveat
+    reads as a relaxation, not an unmet constraint."""
+    from product_scout.degraded_modes import COMMODITY_CATALOG_FLOOR
+
+    products = [make_product(name=n, in_budget=True) for n in ("A", "B", "C")]
+    survey = make_survey_report(
+        differentiation="low", estimated_product_count=COMMODITY_CATALOG_FLOOR
+    )
+    intake = make_intake_answers()
+
+    undifferentiated = RawScoring(
+        scores=[
+            _raw_score(product_name=n, score=6.0 + i * 0.1, role="recommendation", strength_archetype="value")
+            for i, n in enumerate(("A", "B", "C"))
+        ]
+    )
+    scorer = FakeScorer([undifferentiated])
+
+    outcome = run(run_scoring(products, survey, intake, [], False, scorer))
+
+    assert len(scorer.calls) == 1  # never re-prompted
+    assert not any("Unmet scoring constraint" in c for c in outcome.caveats)
+    assert any("§8.4" in c for c in outcome.caveats)
+
+
+def test_run_scoring_skips_reprompt_and_logs_relaxation_in_low_evidence_mode():
+    """§8.3 end to end: the same undifferentiated-set response must not
+    re-prompt when low_evidence_mode=True, even with a survey that is NOT
+    a commodity category (small catalog, default differentiation) — the
+    two relaxations are independent."""
+    products = [make_product(name=n, in_budget=True) for n in ("A", "B", "C")]
+    survey = make_survey_report()  # default: not commodity
+    intake = make_intake_answers()
+
+    undifferentiated = RawScoring(
+        scores=[
+            _raw_score(product_name=n, score=6.0 + i * 0.1, role="recommendation", strength_archetype="value")
+            for i, n in enumerate(("A", "B", "C"))
+        ]
+    )
+    scorer = FakeScorer([undifferentiated])
+
+    outcome = run(run_scoring(products, survey, intake, [], True, scorer))
+
+    assert len(scorer.calls) == 1  # never re-prompted
+    assert not any("Unmet scoring constraint" in c for c in outcome.caveats)
+    assert any("§8.3" in c for c in outcome.caveats)
+    assert not any("§8.4" in c for c in outcome.caveats)  # not a commodity run
+
+
 def test_run_scoring_reprompt_resolves_issue_on_second_attempt():
     products = [make_product(name=n, in_budget=True) for n in ("A", "B", "C")]
     bad = RawScoring(
@@ -586,3 +785,36 @@ def test_run_scoring_threads_low_evidence_mode_into_flip_point_suppression():
     assert scorer.calls[0][4] is True  # low_evidence_mode reached the scorer too
     assert outcome.scores[0].flip_point_amount is None
     assert "too thin" in outcome.scores[0].flip_point_note
+
+
+def test_run_scoring_applies_location_reassignment_before_row_cap_demotion():
+    """End-to-end: an unavailable product Opus still called "recommendation"
+    gets forced to reference_unavailable, and — because that happens BEFORE
+    row-cap counting — a same-sized in-region pool never needs a row-cap
+    demotion it would have needed had the unavailable row still counted."""
+    unavailable = make_product(
+        name="Unavailable",
+        in_budget=True,
+        availability=make_availability(sold_in_region=False),
+    )
+    products = [unavailable] + [
+        make_product(name=f"P{i}", in_budget=True) for i in range(ROW_CAP)
+    ]
+    clean = RawScoring(
+        scores=[_raw_score(product_name="Unavailable", score=9.9, role="recommendation")]
+        + [_raw_score(product_name=f"P{i}", score=6.0 + i * 0.1, role="recommendation") for i in range(ROW_CAP)]
+    )
+    scorer = FakeScorer([clean])
+
+    outcome = run(
+        run_scoring(products, make_survey_report(), make_intake_answers(), [], False, scorer)
+    )
+
+    by_name = {p.name: p for p in outcome.products}
+    assert by_name["Unavailable"].role == "reference_unavailable"
+    # Exactly ROW_CAP recommendation rows remain (P0..P{ROW_CAP-1}) — no
+    # row-cap demotion was needed, since the location caveat already freed
+    # a slot before _demote_for_row_cap ever counted.
+    assert sum(1 for p in outcome.products if p.role == "recommendation") == ROW_CAP
+    assert any("reference_unavailable" in c for c in outcome.caveats)
+    assert not any("reference_displaced" in c for c in outcome.caveats)

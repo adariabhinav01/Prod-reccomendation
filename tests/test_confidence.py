@@ -8,13 +8,14 @@ import pytest
 
 from product_scout.confidence import (
     FLIP_FLOOR,
+    LOW_EVIDENCE_CONFIDENCE_CLAMP,
     build_evidence_profile,
     compute_confidence,
     confidence_band,
     flip_point_eligible,
 )
 from product_scout.models import EvidenceProfile
-from tests.conftest import make_product, make_sourced_value, make_survey_report
+from tests.conftest import NOW, make_product, make_sourced_value, make_survey_report
 
 # -- §4.1 assertion table ----------------------------------------------------
 #
@@ -294,3 +295,149 @@ def test_build_evidence_profile_recency_uses_injected_now():
     product = make_product(specs={"weight": stale})
     profile = build_evidence_profile(product, survey, now=anchor + timedelta(days=365 * 5))
     assert profile.recency_factor == 0.0  # far outside the 9-month software window
+
+
+# -- §8.3 low-evidence confidence clamp --------------------------------------
+#
+# "Confidence clamped to 0.75... Note this clamp rarely binds — a typical
+# low-evidence profile computes to 0.427." CLAUDE.md invariant 10: exercise
+# it against a SYNTHETIC profile that would otherwise exceed it — don't
+# assume it fires on a realistic one.
+
+
+def _saturated_product() -> "object":
+    """Mirrors the §4.1a assertion table's "saturated evidence" row
+    (t1=1, meth=1, 6 reviews, full corroboration, no conflict, fully
+    recent) — computes to 0.950 uncorroborated by any clamp, comfortably
+    above LOW_EVIDENCE_CONFIDENCE_CLAMP."""
+    return make_product(
+        specs={
+            "weight": make_sourced_value(
+                source_type="manufacturer",
+                has_stated_methodology=True,
+                corroborated_by=["https://other.example.com/review"],
+            )
+        },
+        review_sources=[f"https://example.com/review{i}" for i in range(6)],
+    )
+
+
+def test_clamp_binds_on_synthetic_high_confidence_profile_in_low_evidence_mode():
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"])
+    product = _saturated_product()
+
+    unclamped = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+    clamped = build_evidence_profile(product, survey, low_evidence_mode=True, now=NOW)
+
+    assert unclamped.confidence > LOW_EVIDENCE_CONFIDENCE_CLAMP  # would otherwise exceed it
+    assert clamped.confidence == LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert "clamped for low-evidence mode" in clamped.confidence_note
+    assert f"{unclamped.confidence:.3f}" in clamped.confidence_note  # both values recorded
+
+
+def test_clamp_does_not_bind_below_the_ceiling():
+    """Rarely binds in practice — a typical low-evidence profile stays
+    well under 0.75, so the clamp must be a no-op there."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"])
+    product = make_product(
+        specs={"weight": make_sourced_value(source_type="community")},
+        review_sources=["https://forum.example.com/thread/1"],
+    )
+    profile = build_evidence_profile(product, survey, low_evidence_mode=True, now=NOW)
+    assert profile.confidence < LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert "clamped" not in profile.confidence_note
+
+
+def test_clamp_inactive_when_low_evidence_mode_is_false():
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"])
+    product = _saturated_product()
+    profile = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+    assert profile.confidence > LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert "clamped" not in profile.confidence_note
+
+
+def test_clamp_defaults_to_off():
+    """low_evidence_mode has a default (§8.3 is opt-in, not the base case)
+    — calling without it must behave identically to explicitly False."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"])
+    product = _saturated_product()
+    default_profile = build_evidence_profile(product, survey, now=NOW)
+    explicit_profile = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+    assert default_profile.confidence == explicit_profile.confidence
+    assert default_profile.confidence_note == explicit_profile.confidence_note
+
+
+# -- §8.1's per-product moderate-coverage clamp (no run-level flag involved) -
+
+
+def _n_review_saturated_product(n: int):
+    """Otherwise-saturated (tier-1, methodology, corroborated, fully
+    recent) but with exactly `n` independent reviews — isolates review
+    count as the only lever."""
+    return make_product(
+        specs={
+            "weight": make_sourced_value(
+                source_type="manufacturer",
+                has_stated_methodology=True,
+                corroborated_by=["https://other.example.com/review"],
+            )
+        },
+        review_sources=[f"https://example.com/review{i}" for i in range(n)],
+    )
+
+
+def test_review_count_one_can_never_exceed_the_clamp_even_unclamped():
+    """Documents WHY the moderate-coverage threshold below is 4, not 2:
+    review_credit(1) caps breadth at 0.6313 regardless of every other
+    factor maxing out — a threshold of `< 2` would gate a clamp that could
+    never actually fire, i.e. dead code."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"])
+    profile = build_evidence_profile(
+        _n_review_saturated_product(1), survey, low_evidence_mode=False, now=NOW
+    )
+    assert profile.confidence < LOW_EVIDENCE_CONFIDENCE_CLAMP
+
+
+def test_moderate_coverage_clamps_an_undercovered_product_even_without_the_flag():
+    """§8.1: 'moderate | ... | Proceed; low-evidence for under-covered
+    products only.' §8.3: the clamp 'exists for the moderate coverage
+    path, where a well-covered product sits inside a partially-low-
+    evidence run.' The RUN-level low_evidence_mode flag is False the
+    whole time — coverage="moderate" plus this product's own review count
+    (3, below the §8.1 moderate-row ceiling of 4) is what triggers it."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"], coverage="moderate")
+    product = _n_review_saturated_product(3)
+
+    profile = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+
+    assert profile.confidence == LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert "under-covered product in a moderate-coverage run" in profile.confidence_note
+
+
+def test_moderate_coverage_boundary_four_reviews_is_not_undercovered():
+    """`< 4`, not `<= 4` — the §8.1 row's own ceiling counts as adequately
+    covered, not under-covered."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"], coverage="moderate")
+    profile = build_evidence_profile(
+        _n_review_saturated_product(4), survey, low_evidence_mode=False, now=NOW
+    )
+    assert "clamped" not in profile.confidence_note
+
+
+def test_moderate_coverage_does_not_clamp_a_well_covered_product():
+    """The nuance is 'under-covered products ONLY' — a product with
+    plenty of its own reviews stays unclamped even in a moderate run."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"], coverage="moderate")
+    product = _saturated_product()  # 6 independent reviews
+    profile = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+    assert profile.confidence > LOW_EVIDENCE_CONFIDENCE_CLAMP
+    assert "clamped" not in profile.confidence_note
+
+
+def test_rich_coverage_does_not_apply_the_moderate_undercovered_clamp():
+    """The §8.1 nuance is stated only for the moderate row — a thinly-
+    cited product in a RICH-coverage run isn't covered by this clause."""
+    survey = make_survey_report(dimensions=[], comparison_specs=["weight"], coverage="rich")
+    product = _n_review_saturated_product(3)
+    profile = build_evidence_profile(product, survey, low_evidence_mode=False, now=NOW)
+    assert "clamped" not in profile.confidence_note

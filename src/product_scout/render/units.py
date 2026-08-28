@@ -104,3 +104,19 @@ def convert_display_value(
     counterpart_unit, factor = _CONVERSION[native_unit]
     converted = amount * factor
     return f"{value} ({converted:.1f} {counterpart_unit})"
+
+
+# §0: "Units: Derived from location, overridable." The only two countries
+# using a non-metric system for everyday retail measurements — everywhere
+# else defaults to metric. `settings.py`'s `DisplaySettings.units` stays
+# `None` until a run actually resolves a `Location`, at which point
+# `phases/intake.py` calls this once and writes the result back (build order
+# step 11 — this closes the deferral that module's own docstring names).
+_IMPERIAL_COUNTRIES: frozenset[str] = frozenset({"US", "LR", "MM"})
+
+
+def derive_units_from_country(country: str) -> Literal["imperial", "metric"]:
+    """§10.1's `display.units` default, derived rather than hard-coded to
+    `"imperial"` — that literal in §10.1's example TOML is the *post-
+    derivation* state for a US buyer, not a universal default."""
+    return "imperial" if country.strip().upper() in _IMPERIAL_COUNTRIES else "metric"
