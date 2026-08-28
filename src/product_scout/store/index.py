@@ -1,7 +1,11 @@
-"""Cross-category run history index (spec docs/handoff.md §13).
+"""Cross-category run history index (spec docs/handoff.md §16, v7).
 
-'Keep index.json a derived artifact — rebuildable by scanning runs/, so a
-corrupted index is never data loss.'
+'index.json is a derived artifact so a corrupted index is never data loss.'
+
+§16's storage layout doesn't re-specify the on-disk value shape the way v3's
+did (`run_id -> {category, created_at, verdict, top_pick, run_path}`); this
+module carries that shape forward unchanged since nothing in v7 contradicts
+it — flagged in the step 1 plan rather than silently assumed.
 """
 
 from __future__ import annotations
@@ -18,9 +22,11 @@ from product_scout.models import RunRecord
 class IndexEntry(BaseModel):
     """One row of run history.
 
-    §13 documents the on-disk shape as `run_id -> {category, created_at,
-    verdict, top_pick, run_path}` — a 5-field value object, with run_id
-    living only as the dict key, not duplicated inside it. `run_id` is kept
+    Carried forward from v3's §13, which documented the on-disk shape as
+    `run_id -> {category, created_at, verdict, top_pick, run_path}` — a
+    5-field value object, with run_id living only as the dict key, not
+    duplicated inside it. v7's §16 doesn't re-specify this; see the module
+    docstring. `run_id` is kept
     on this Python model anyway, so a flattened `list[IndexEntry]` (as
     returned by `list_entries()`/`rebuild()`) stays self-describing without
     callers having to drag the dict key along separately. It's populated

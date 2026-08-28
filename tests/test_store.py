@@ -109,3 +109,23 @@ def test_store_uses_injected_root_not_default_home(tmp_path, run_record_factory)
     store.save(run_record_factory(run_id="run-i"))
     assert (isolated_root / "runs" / "run-i" / "record.json").exists()
     assert (isolated_root / "index.json").exists()
+
+
+# -- checkpointing delegation (§16.1) -----------------------------------------
+
+
+def test_store_save_and_load_checkpoint(store):
+    store.save_checkpoint("run-k", "survey", {"coverage": "rich"})
+    assert store.load_checkpoint("run-k", "survey") == {"coverage": "rich"}
+
+
+def test_store_latest_completed_phase(store):
+    assert store.latest_completed_phase("run-l") is None
+    store.save_checkpoint("run-l", "intake", {})
+    store.save_checkpoint("run-l", "survey", {})
+    assert store.latest_completed_phase("run-l") == "survey"
+
+
+def test_store_checkpoint_path_lives_under_run_dir(store):
+    store.save_checkpoint("run-m", "extraction", {"products": []})
+    assert (store.run_dir("run-m") / "phases" / "extraction.json").exists()
