@@ -95,6 +95,12 @@ treatment `phases/extraction.py` got in the same build step, closing both
 gaps together rather than patching them one at a time, exactly as this
 note used to say a future step should.
 
+`research`/`run_prior_gen` also take `budget: RunBudget` (build order step
+13, required, no default) — the run-scoped §13 cost-cap counter, threaded
+into `SdkPriorGenResearcher.research()`'s `ClaudeAgentOptions(hooks=...)`
+the same way `ledger` already is. See `hooks/budget.py`'s module docstring
+for why this must be the SAME instance every research phase shares.
+
 ### §12.1's conditional-section rule and §12.6's omit/disclose split
 
 §12.1: "It appears only when there is something actionable to say. No
@@ -120,7 +126,13 @@ from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, qu
 from pydantic import BaseModel
 
 from product_scout import config
+from product_scout.hooks.budget import (
+    RunBudget,
+    cost_cap_post_tool_use_matchers,
+    cost_cap_pre_tool_use_matchers,
+)
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
 from product_scout.tools.record_product import RECORD_PRODUCT_SCHEMA, build_product_from_args
@@ -190,7 +202,11 @@ class PriorGenResearcher(Protocol):
     """Seam for Phase 5's actual research call."""
 
     async def research(
-        self, seeds: list[Product], ledger: FetchLedger, low_evidence_mode: bool
+        self,
+        seeds: list[Product],
+        ledger: FetchLedger,
+        low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> RawPriorGen: ...
 
 
@@ -262,6 +278,7 @@ async def run_prior_gen(
     ledger: FetchLedger,
     location: Location,
     low_evidence_mode: bool,
+    budget: RunBudget,
     researcher: PriorGenResearcher,
 ) -> PriorGenOutcome:
     """Run Phase 5 end to end: research every current-gen seed in one
@@ -288,7 +305,7 @@ async def run_prior_gen(
     if not current_gen_seeds:
         return PriorGenOutcome(products=[], caveats=[])
 
-    raw = await researcher.research(current_gen_seeds, ledger, low_evidence_mode)
+    raw = await researcher.research(current_gen_seeds, ledger, low_evidence_mode, budget)
     seeds_by_name = {p.name: p for p in current_gen_seeds}
 
     products: list[Product] = []
@@ -406,7 +423,11 @@ class SdkPriorGenResearcher:
         self._model = model
 
     async def research(
-        self, seeds: list[Product], ledger: FetchLedger, low_evidence_mode: bool
+        self,
+        seeds: list[Product],
+        ledger: FetchLedger,
+        low_evidence_mode: bool,
+        budget: RunBudget,
     ) -> RawPriorGen:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
@@ -423,7 +444,12 @@ class SdkPriorGenResearcher:
             allowed_tools=["WebSearch", "WebFetch"],
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
-            hooks={"PostToolUse": ledger_hook_matchers(ledger)},  # §4.3
+            hooks={
+                "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
+                + cost_cap_pre_tool_use_matchers(budget),
+                "PostToolUse": ledger_hook_matchers(ledger)  # §4.3
+                + cost_cap_post_tool_use_matchers(budget),
+            },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 

@@ -15,6 +15,7 @@ from product_scout.render.report import (
 from tests.conftest import (
     make_availability,
     make_caveat,
+    make_cluster,
     make_evidence_profile,
     make_pricing_model,
     make_product,
@@ -53,6 +54,53 @@ def test_banner_appears_before_comparison_table_not_a_footnote():
     banner_idx = _index(html, "low-evidence-banner")
     table_idx = _index(html, '<section class="comparison">')
     assert banner_idx < table_idx
+
+
+# -- truncation banner: §13.1 -------------------------------------------
+
+
+def test_no_truncation_banner_when_not_truncated():
+    run = make_run_record(truncated_at_phase=None)
+    html = render_html(run)
+    assert "truncation-banner" not in html
+
+
+def test_truncation_banner_present_and_names_the_phase():
+    run = make_run_record(truncated_at_phase=3)  # PHASE_NAMES[3] == "extraction"
+    html = render_html(run)
+    assert "truncation-banner" in html
+    assert "extraction phase" in html
+
+
+def test_truncation_banner_names_unresearched_clusters():
+    survey = make_survey_report(
+        clusters=[
+            make_cluster(key="mid-tier", label="Mid-tier"),
+            make_cluster(key="budget", label="Budget"),
+        ]
+    )
+    run = make_run_record(
+        survey=survey,
+        products=[make_product(cluster_key="mid-tier")],
+        truncated_at_phase=3,
+    )
+    html = render_html(run)
+    assert "Budget" in html
+
+
+def test_truncation_banner_appears_before_comparison_table():
+    run = make_run_record(truncated_at_phase=3)
+    html = render_html(run)
+    banner_idx = _index(html, "truncation-banner")
+    table_idx = _index(html, '<section class="comparison">')
+    assert banner_idx < table_idx
+
+
+def test_both_banners_can_render_together():
+    run = make_run_record(low_evidence_mode=True, truncated_at_phase=1)
+    html = render_html(run)
+    assert "low-evidence-banner" in html
+    assert "truncation-banner" in html
 
 
 # -- verdict: always visible, INSUFFICIENT_EVIDENCE framing (§6.1, §8.5) ----

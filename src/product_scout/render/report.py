@@ -49,10 +49,12 @@ from pathlib import Path
 from string import Template
 
 from product_scout.confidence import confidence_band, flip_point_eligible
+from product_scout.degraded_modes import unresearched_cluster_labels
 from product_scout.location import SHIPS_FROM_UNCERTAIN_THRESHOLD
 from product_scout.models import Caveat, Product, RunRecord, Scored
 from product_scout.render.scale import build_scale_rows, format_price, render_scale_svg
 from product_scout.render.units import convert_display_value
+from product_scout.store.checkpoint import PHASE_NAMES
 
 _TEMPLATE_PATH = Path(__file__).parent / "template.html"
 
@@ -179,6 +181,33 @@ def _render_banner(run: RunRecord) -> str:
         "requirements — every relaxation is logged in the notes section "
         "below. Confidence is capped, and flip points are suppressed "
         "entirely."
+        "</div>"
+    )
+
+
+def _render_truncation_banner(run: RunRecord) -> str:
+    """§13.1: 'a banner stating research was truncated and where, every
+    unresearched cluster named.' Renders only when `run.truncated_at_phase`
+    is non-null, mirroring `_render_banner` (low-evidence) exactly in
+    shape/styling — the two are independent and can both render on the
+    same run (a run can be both low-evidence AND truncated)."""
+    if run.truncated_at_phase is None:
+        return ""
+    phase_name = (
+        PHASE_NAMES[run.truncated_at_phase]
+        if 0 <= run.truncated_at_phase < len(PHASE_NAMES)
+        else "an unknown phase"
+    )
+    unresearched = unresearched_cluster_labels(run.survey, run.products)
+    unresearched_note = (
+        f" Unresearched: {', '.join(unresearched)}." if unresearched else ""
+    )
+    return (
+        '<div class="banner truncation-banner">'
+        f"<strong>Research was truncated at the {_esc(phase_name)} phase.</strong> "
+        "This run's cost cap was reached, so the orchestrator stopped issuing "
+        "new research calls and completed this report from what it already "
+        f"had (§13.1).{_esc(unresearched_note)}"
         "</div>"
     )
 
@@ -427,6 +456,7 @@ def render_html(run: RunRecord) -> str:
         [
             f"<h1>{_esc(run.product_type)}</h1>",
             _render_banner(run),
+            _render_truncation_banner(run),
             _render_verdict_section(run),
             _render_written_recommendations(top_picks),
             _render_scale_section(run),

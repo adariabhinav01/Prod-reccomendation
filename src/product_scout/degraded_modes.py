@@ -1,5 +1,6 @@
 """Degraded modes: commodity-category classification (spec docs/handoff.md
-§8.4, build order step 12).
+§8.4, build order step 12) and §13.1's unresearched-cluster diff (build
+order step 13).
 
 `RunRecord.low_evidence_mode` is genuinely stateful — whether it's set
 depends on the §8.2 broadening interrupt and what the user chose, which
@@ -32,7 +33,7 @@ for §4.1, `location.py` for §10, this one for §8.4.
 
 from __future__ import annotations
 
-from product_scout.models import SurveyReport
+from product_scout.models import Product, SurveyReport
 
 # §8.4 gives no number for "large catalog" — a genuinely underspecified
 # corner, resolved here rather than left to silently mean "any commodity-
@@ -62,3 +63,25 @@ def is_commodity_category(report: SurveyReport) -> bool:
     stateful `commodity_category` parameter threaded everywhere.
     """
     return report.differentiation == "low" and report.estimated_product_count >= COMMODITY_CATALOG_FLOOR
+
+
+def unresearched_cluster_labels(survey: SurveyReport, products: list[Product]) -> list[str]:
+    """§13.1: 'every unresearched cluster named.' A pure diff, not a
+    persisted field — `RunRecord` has nowhere to put this (no field for
+    it, and none is needed): a cluster counts as researched once at least
+    one `Product.cluster_key` in the FINAL product set names it, whether
+    truncation happened or not. Needed by both `orchestrator.py` (to build
+    the §13.1 truncation caveat's text) and `render/report.py` (to build
+    the truncation banner's text) — living here, rather than in either of
+    those, is this module's own established reason for existing: a shared,
+    non-phase module neither caller can import from the other (see this
+    module's own top docstring on why `phases/*.py` modules never import
+    from each other, and `render/report.py`'s docstring on why it never
+    imports from `orchestrator.py`).
+
+    Order-preserving (survey.clusters' own order), not sorted — matches
+    this codebase's general preference for stable, input-derived ordering
+    over an alphabetized re-sort that would just be re-deriving something
+    already implicit in the input."""
+    researched_keys = {p.cluster_key for p in products}
+    return [c.label for c in survey.clusters if c.key not in researched_keys]

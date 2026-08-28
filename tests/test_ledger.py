@@ -1,12 +1,15 @@
 """Unit tests for hooks/ledger.py — the §4.3 provenance ledger (build
-order step 8). Pure Python, no SDK/model call needed — `FetchLedger` is
+order step 8) and §13's status/timestamp record on each entry (build order
+step 13). Pure Python, no SDK/model call needed — `FetchLedger` is
 constructed directly and fed hand-built fetch/search records, exactly the
 way a real `PostToolUse` hook would populate it, but without depending on
 that hook's own (unverified, see module docstring) parsing of a live tool
 response.
 """
 
-from product_scout.hooks.ledger import FetchLedger
+from datetime import datetime, timezone
+
+from product_scout.hooks.ledger import FetchLedger, _extract_status
 
 FETCHED_URL = "https://example.com/spec-sheet"
 REDIRECT_TARGET = "https://cdn.example.com/spec-sheet-final"
@@ -136,3 +139,101 @@ def test_recording_empty_url_is_a_no_op():
     ledger.record_fetch("")
     ledger.record_seen("")
     assert ledger.mode_for("") is None
+
+
+# -- entry_for: §13's fuller record (status, timestamp), build order step 13 -
+
+
+def test_entry_for_unseen_url_is_none():
+    ledger = FetchLedger()
+    assert ledger.entry_for(NEVER_SEEN_URL) is None
+
+
+def test_entry_for_empty_url_is_none():
+    ledger = FetchLedger()
+    assert ledger.entry_for("") is None
+
+
+def test_record_fetch_populates_entry_mode_status_and_timestamp():
+    ledger = FetchLedger()
+    before = datetime.now(timezone.utc)
+    ledger.record_fetch(FETCHED_URL, status="ok")
+    after = datetime.now(timezone.utc)
+
+    entry = ledger.entry_for(FETCHED_URL)
+    assert entry is not None
+    assert entry.mode == "fetched"
+    assert entry.status == "ok"
+    assert before <= entry.observed_at <= after
+
+
+def test_record_fetch_defaults_status_to_none_when_not_given():
+    ledger = FetchLedger()
+    ledger.record_fetch(FETCHED_URL)
+    assert ledger.entry_for(FETCHED_URL).status is None
+
+
+def test_record_fetch_with_redirect_gives_both_urls_the_same_status_and_timestamp():
+    ledger = FetchLedger()
+    ledger.record_fetch(FETCHED_URL, redirected_to=REDIRECT_TARGET, status="ok")
+    original = ledger.entry_for(FETCHED_URL)
+    redirected = ledger.entry_for(REDIRECT_TARGET)
+    assert original.status == redirected.status == "ok"
+    assert original.observed_at == redirected.observed_at
+
+
+def test_record_seen_populates_entry_with_seen_not_fetched_mode():
+    ledger = FetchLedger()
+    ledger.record_seen(SEARCH_ONLY_URL, status="ok")
+    entry = ledger.entry_for(SEARCH_ONLY_URL)
+    assert entry.mode == "seen_not_fetched"
+    assert entry.status == "ok"
+
+
+def test_record_seen_after_fetched_does_not_replace_the_fetched_entry():
+    """Mirrors test_seen_after_fetched_does_not_downgrade for mode_for —
+    the fuller LedgerEntry must not regress either."""
+    ledger = FetchLedger()
+    ledger.record_fetch(FETCHED_URL, status="ok")
+    fetched_entry = ledger.entry_for(FETCHED_URL)
+    ledger.record_seen(FETCHED_URL, status="different")
+    assert ledger.entry_for(FETCHED_URL) == fetched_entry
+
+
+def test_record_fetch_after_seen_upgrades_the_entry_too():
+    """Mirrors test_fetched_after_seen_upgrades_admissibility for mode_for."""
+    ledger = FetchLedger()
+    ledger.record_seen(SEARCH_ONLY_URL, status="ok")
+    ledger.record_fetch(SEARCH_ONLY_URL, status="ok")
+    assert ledger.entry_for(SEARCH_ONLY_URL).mode == "fetched"
+
+
+def test_explicit_observed_at_is_honored_over_the_default_now():
+    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    ledger = FetchLedger()
+    ledger.record_fetch(FETCHED_URL, observed_at=fixed)
+    assert ledger.entry_for(FETCHED_URL).observed_at == fixed
+
+
+# -- _extract_status: best-effort status extraction from an opaque payload ---
+
+
+def test_extract_status_reads_a_conventional_status_key():
+    assert _extract_status({"status": "200"}) == "200"
+    assert _extract_status({"http_status": 200}) == "200"
+    assert _extract_status({"status_code": 404}) == "404"
+
+
+def test_extract_status_reads_an_error_flag():
+    assert _extract_status({"error": "not found"}) == "error"
+    assert _extract_status({"is_error": True}) == "error"
+
+
+def test_extract_status_defaults_to_ok_for_an_unrecognized_dict_shape():
+    assert _extract_status({"content": "some page text"}) == "ok"
+
+
+def test_extract_status_is_none_for_a_non_dict_response():
+    assert _extract_status("plain text response") is None
+    assert _extract_status(None) is None
+    assert _extract_status(["a", "list"]) is None

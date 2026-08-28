@@ -8,14 +8,21 @@ REFINE (Opus, build order step 7 — `phases/refine.py`). `MODEL_OPUS`'s value
 matches the literal string already used by `tests/conftest.py`'s
 `make_run_record()` `model_ids` fixture.
 
-`MAX_DISCOVERY_SEARCHES` / `MAX_EXTRACTION_FETCHES_PER_PRODUCT` are soft caps
-— referenced in the discovery/extraction prompts as a self-limit, not yet
-mechanically enforced. Hard enforcement via a `PreToolUse` hook is build
-order step 10 (§10); these constants exist now so that step wires a hook
-against an already-named budget instead of inventing the number then. §8.1a:
-"a full research run on a category with nothing to find is the most
-expensive way to learn the category has nothing to find" — cost-consciousness
-should be on the books from the first real SDK call, even while unenforced.
+`MAX_DISCOVERY_SEARCHES` / `MAX_EXTRACTION_FETCHES_PER_PRODUCT` (and
+`MAX_SURVEY_SEARCHES`/`MAX_TIMING_SEARCHES`/`MAX_PRIOR_GEN_SEARCHES` below)
+are soft, PER-PHASE caps — referenced in each phase's own prompt as a
+self-limit, never mechanically enforced (`MAX_DISCOVERY_SEARCHES` is dead
+weight: `discovery.py` itself is an unused, superseded prototype —
+`survey.py` absorbed its job). `MAX_RUN_FETCHES`/`MAX_RUN_SEARCHES` below
+are the different thing §13 actually hard-enforces: one GLOBAL total across
+the whole run, via a `PreToolUse` hook reading a counter `orchestrator.py`
+(build order step 13) owns — see that constant's own comment and
+`hooks/budget.py` for why a per-phase soft limit and a run-wide hard cap are
+deliberately two different mechanisms, not one. §8.1a: "a full research run
+on a category with nothing to find is the most expensive way to learn the
+category has nothing to find" — cost-consciousness should be on the books
+from the first real SDK call, even while the per-phase numbers stay
+unenforced.
 
 No I/O lives here. `ANTHROPIC_API_KEY` handling belongs at a future `cli.py`
 entrypoint (via `python-dotenv`, already a dependency) — this module never
@@ -71,3 +78,19 @@ MARKET_TIMING_SKILL: str = "market-timing"
 # it has to search for the predecessor first, which extraction never does.
 MAX_TIMING_SEARCHES: int = 8
 MAX_PRIOR_GEN_SEARCHES: int = 10
+
+# §13's global cost cap — "Hard-stop at N fetches / M searches" — with no
+# spec-given number, unlike the per-phase soft caps above. Sized generously
+# above what a full run can realistically spend on each side, since this is
+# meant to rarely bind (same spirit as the low-evidence `0.75` clamp and
+# `degraded_modes.COMMODITY_CATALOG_FLOOR`): EXTRACTION alone can reach
+# roughly MAX_EXTRACTION_FETCHES_PER_PRODUCT(6) x up to 12 candidates
+# (§5.1's row-cap ceiling) = ~72 fetches; MAX_RUN_FETCHES leaves headroom
+# above that plus SURVEY/TIMING/PRIOR_GEN's own incidental fetches.
+# MAX_SURVEY_SEARCHES(12) + MAX_TIMING_SEARCHES(8) + MAX_PRIOR_GEN_SEARCHES(10)
+# = 30; MAX_RUN_SEARCHES leaves headroom above that. Enforced by
+# `hooks/budget.py`'s `RunBudget`, wired by `orchestrator.py` (build order
+# step 13) — a tuning candidate for §17.1's golden set, same as
+# COMMODITY_CATALOG_FLOOR.
+MAX_RUN_FETCHES: int = 120
+MAX_RUN_SEARCHES: int = 40
