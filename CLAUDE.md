@@ -41,8 +41,8 @@ contains. Keep only checkboxes here.
 - [x] 4. Phase 0 intake
 - [x] 5. Phase 1 SURVEY + clusters/dimensions + broadening interrupt
 - [x] 6. Renderer against fixture data
-- [ ] 7. Phase 2 REFINE
-- [ ] 8. Phase 3 EXTRACTION + ledger validation
+- [x] 7. Phase 2 REFINE
+- [x] 8. Phase 3 EXTRACTION + ledger validation
 - [ ] 9. Phases 6a/6b + constraint enforcement
 - [ ] 10. Phases 4–5 timing + prior-gen
 - [ ] 11. Location end to end

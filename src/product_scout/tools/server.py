@@ -1,22 +1,30 @@
-"""The `scout` SDK MCP server (spec docs/handoff.md §3, build order step 5).
+"""The `scout` SDK MCP server (spec docs/handoff.md §3, build order steps
+5 and 8).
 
-`record_product` only. `ask_user` is explicitly out of scope here — it's
-fully spec'd in §3 but no phase in this build order wires it as an SDK tool
-yet (that's Phase 6/7's refine loop); adding it now would be dead code with
-no caller and no test target.
+`record_product` only. `ask_user`/`ask_topic`/`ask_choice` are explicitly
+out of scope here — `phases/refine.py` (build order step 7) calls
+`QuestionPort` directly rather than wiring those as SDK tools; see that
+module's docstring for why.
 """
 
 from __future__ import annotations
 
 from claude_agent_sdk import McpSdkServerConfig, create_sdk_mcp_server
 
+from product_scout.hooks.ledger import FetchLedger
+from product_scout.models import SurveyReport
 from product_scout.tools.record_product import ProductSink, make_record_product
 
 
-def build_scout_server(sink: ProductSink) -> McpSdkServerConfig:
-    """Wire `record_product` (writing into `sink`) into the `scout` server.
+def build_scout_server(
+    sink: ProductSink, survey: SurveyReport, ledger: FetchLedger
+) -> McpSdkServerConfig:
+    """Wire `record_product` (writing into `sink`, evidence-scored against
+    `survey`, §4.3-validated against `ledger`) into the `scout` server.
 
     Referenced on the wire as `mcp__scout__record_product`, matching §3's
-    `allowed_tools`/`AgentDefinition.tools` entries.
+    `allowed_tools` entries.
     """
-    return create_sdk_mcp_server(name="scout", tools=[make_record_product(sink)])
+    return create_sdk_mcp_server(
+        name="scout", tools=[make_record_product(sink, survey, ledger)]
+    )
