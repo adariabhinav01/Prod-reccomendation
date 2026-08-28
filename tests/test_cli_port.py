@@ -299,3 +299,13 @@ def test_offer_bailout_accepts_yes_variants(raw, expected):
 def test_offer_bailout_defaults_to_no(raw, expected):
     port, _ = make_port([raw])
     assert run(port.offer_bailout()) is expected
+
+
+# -- ask_text: bare free-text prompt, no escape hatch (build order step 4) ---
+
+
+def test_ask_text_prints_prompt_and_returns_stripped_input():
+    port, printed = make_port(["  Old Widget v2  "])
+    answer = run(port.ask_text("What's the current model you own?"))
+    assert answer == "Old Widget v2"
+    assert any("What's the current model you own?" in line for line in printed)

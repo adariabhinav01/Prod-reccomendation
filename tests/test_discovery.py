@@ -13,24 +13,11 @@ from product_scout.phases.discovery import (
     _parse_candidate_list,
     run_discovery,
 )
-from product_scout.phases.intake import Intake
+from tests.conftest import make_intake_answers as make_intake
 
 
 def run(coro):
     return asyncio.run(coro)
-
-
-def make_intake(**overrides) -> Intake:
-    defaults = dict(
-        owns_current=False,
-        current_model=None,
-        budget_mode="no_limit",
-        budget_usd=None,
-        required_features=[],
-        named_candidates=[],
-    )
-    defaults.update(overrides)
-    return Intake(**defaults)
 
 
 class FakeDiscoverer:
@@ -57,21 +44,21 @@ def test_fake_discoverer_satisfies_discoverer():
 
 
 def test_merges_named_candidates_ahead_of_discovered():
-    intake = make_intake(named_candidates=["X"])
+    intake = make_intake(candidates_under_consideration=["X"])
     discoverer = FakeDiscoverer(["Y", "Z"])
     result = run(run_discovery("widgets", intake, discoverer))
     assert result == ["X", "Y", "Z"]
 
 
 def test_dedupes_case_insensitive_exact_match_first_casing_wins():
-    intake = make_intake(named_candidates=["Acme Pro"])
+    intake = make_intake(candidates_under_consideration=["Acme Pro"])
     discoverer = FakeDiscoverer(["acme pro", "Other"])
     result = run(run_discovery("widgets", intake, discoverer))
     assert result == ["Acme Pro", "Other"]
 
 
 def test_caps_at_max_discovery_candidates_named_never_dropped():
-    intake = make_intake(named_candidates=["Named A", "Named B"])
+    intake = make_intake(candidates_under_consideration=["Named A", "Named B"])
     discovered = [f"Discovered {i}" for i in range(10)]
     discoverer = FakeDiscoverer(discovered)
     result = run(run_discovery("widgets", intake, discoverer))
@@ -81,14 +68,14 @@ def test_caps_at_max_discovery_candidates_named_never_dropped():
 
 
 def test_empty_named_and_discovered_returns_empty():
-    intake = make_intake(named_candidates=[])
+    intake = make_intake(candidates_under_consideration=[])
     discoverer = FakeDiscoverer([])
     result = run(run_discovery("widgets", intake, discoverer))
     assert result == []
 
 
 def test_blank_named_candidates_are_skipped():
-    intake = make_intake(named_candidates=["  ", ""])
+    intake = make_intake(candidates_under_consideration=["  ", ""])
     discoverer = FakeDiscoverer(["Real Candidate"])
     result = run(run_discovery("widgets", intake, discoverer))
     assert result == ["Real Candidate"]

@@ -272,6 +272,20 @@ class IntakeAnswers(BaseModel):
     required_features: list[str] = []  # FILTERS, not preferences
     candidates_under_consideration: list[str] = []
 
+    @model_validator(mode="after")
+    def _current_model_matches_ownership(self) -> "IntakeAnswers":
+        if self.owns_current_version and not self.current_model:
+            raise ValueError(
+                "IntakeAnswers.current_model is required when "
+                "owns_current_version=True (§7 item 1)."
+            )
+        if not self.owns_current_version and self.current_model:
+            raise ValueError(
+                "IntakeAnswers.current_model must be None when "
+                f"owns_current_version=False (§7 item 1); got {self.current_model!r}."
+            )
+        return self
+
 
 class TimingAssessment(BaseModel):
     """Phase 4 (TIMING) output. Predictive by nature — see §6.5: every claim

@@ -25,6 +25,12 @@ from product_scout.models import (
     TopicAnswer,
     Verdict,
 )
+from product_scout.settings import (
+    DisplaySettings,
+    LocationSettings,
+    Settings,
+    SourcesSettings,
+)
 
 NOW = datetime(2026, 8, 1, tzinfo=timezone.utc)
 
@@ -303,3 +309,13 @@ def make_run_record(**overrides) -> RunRecord:
 @pytest.fixture
 def run_record_factory():
     return make_run_record
+
+
+def make_settings(**overrides) -> Settings:
+    defaults = dict(
+        location=LocationSettings(country="US", currency="USD"),
+        display=DisplaySettings(output_language="en", units="imperial"),
+        sources=SourcesSettings(trusted=[]),
+    )
+    defaults.update(overrides)
+    return Settings(**defaults)

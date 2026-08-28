@@ -7,7 +7,7 @@ the terminal implementation built now, `web_port.py` the HTTP implementation
 stubbed for later. Invariant 9: "All user interaction routes through
 QuestionPort. No phase calls terminal input directly."
 
-### Three primitives, three different jobs
+### Four primitives, four different jobs
 
 `ask_choice` — a bare categorical question, N options plus one caller-supplied
 escape hatch string. Used for the §9.6 two-attempt "not sure" loop.
@@ -17,6 +17,19 @@ escape hatch string. Used for the §9.6 two-attempt "not sure" loop.
 `TopicAnswer`. This is REFINE's main loop primitive.
 
 `offer_bailout` — "skip the rest and use your best judgment" (§9.7a).
+
+`ask_text` — a bare free-text prompt, no escape hatch, no gate/axis
+structure. §9 opens with "Read by Opus in Phase 2," and §9.8 is the one
+sentence distinguishing Phase 0 from that machinery: "Phase 0 only catches
+requirements the user knows to name." §1 confirms Phase 0 is "Python ──
+fixed questions, no model calls." None of the other three primitives fit:
+`ask_choice` forces a real escape-hatch menu item Phase 0's plain questions
+don't have (§9.6's escape hatches are REFINE-specific), and `ask_topic`
+forces the full gate+axis+free-text composite onto a phase that runs before
+any `Dimension`/`SurveyReport` exists to gate or axis against. `ask_text`
+exists so `phases/intake.py` (build order step 4) has a primitive to ask
+plain questions on, doing its own deterministic parsing (yes/no, budget
+regex, CSV splitting) in Python — matching "no model calls" exactly.
 
 ### The two-attempt escape-hatch swap lives in the CALLER, not the port (§9.6)
 
@@ -117,3 +130,5 @@ class QuestionPort(Protocol):
     async def ask_topic(self, topic: TopicPrompt) -> TopicAnswer: ...
 
     async def offer_bailout(self) -> bool: ...
+
+    async def ask_text(self, prompt: str) -> str: ...

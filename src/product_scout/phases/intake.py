@@ -1,115 +1,75 @@
-"""Phase 0 — INTAKE (spec docs/handoff.md §7, build order step 3).
+"""Phase 0 — INTAKE (spec docs/handoff.md §7, build order step 4).
 
-"Deterministic Python, no model" (§1). The four fixed questions run before
-any model call and before Phase 1's coverage probe, so `run_intake` takes
-`product_type` as a plain string — the category is assumed already known
-(e.g. from a CLI argument), not asked here; §7 only defines the four
-questions below.
+§1: "0 INTAKE Python ── fixed questions, no model calls." §9 opens with
+"Read by Opus in Phase 2," and §9.8 is the one sentence distinguishing this
+phase from that machinery: "Phase 0 only catches requirements the user knows
+to name." So the five §7.1 questions are flat, direct prompts — never routed
+through `ask_topic`'s gate/axis composite, which is REFINE's (Phase 2's)
+primitive and which needs `Dimension`/`SurveyReport` data that doesn't exist
+until Phase 1 (SURVEY) has run. `run_intake` asks its questions via
+`QuestionPort.ask_text` (build order step 4) and does its own deterministic
+parsing (yes/no, budget regex, CSV splitting) in Python.
 
-### SPEC GAP-FILL — `Intake` output shape
+`run_intake`'s output is `models.IntakeAnswers` directly — the schema
+`RunRecord.intake` actually uses. (An earlier draft of this module defined
+its own `Intake` model with a different shape — `owns_current`/`budget_mode`
+enum/`named_candidates` — that was never reconciled with `IntakeAnswers` and
+has been removed.)
 
-§7 names four questions but §4's `RunRecord.intake` is a bare, untyped
-`dict` — no schema is given anywhere in the spec for what Phase 0 must
-produce. `Intake` here is designed from §7's own wording, one field per
-question. It is deliberately **not** referenced by `RunRecord` (which keeps
-`intake: dict` exactly as spec'd) — `Intake` exists so construction is
-validated hard and fails loudly (§4's own directive, applied here by
-analogy), and whatever wires this phase into the orchestrator later stores
-`Intake.model_dump()` into that dict.
+### Location capture (§10.1)
 
-### SPEC GAP-FILL — a dollar amount for "flexible" budget too
+§7.1 item 5: "Location, only if not already in settings (§10.1)." §10.1:
+"Asked once in Phase 0 if missing, written back, reused silently." This
+phase checks `settings.load(...).location.has_location` first; if already
+set, it's reused silently and nothing is asked. If missing, both country and
+currency are asked (the spec gives no country -> currency derivation rule —
+only *units* are stated as derived, and CLAUDE.md's build order defers both
+units derivation and the rest of location handling to a separate step, "11.
+Location end to end" — out of scope here) and written back via
+`settings.set_value`/`settings.save`.
 
-§7 item 2 gives three budget modes but only spells out what the number does
-for `hard_ceiling` (§5.1's above-budget reference row is a cutoff against
-it). It says nothing about whether "flexible if quality justifies it" needs
-a number at all. `Intake` requires one for `flexible` too, on the theory
-that "flexible" has to be flexible *relative to something* — without an
-anchor, Opus (Phase 7, not yet built) has no way to judge whether a given
-price is a reasonable stretch or a big one, and "flexible" would silently
-collapse into "no limit" in practice. E.g. a $600 anchor makes a $650 desk
-an easy stretch ("$50 more for steel vs. laminate") and a $1,400 desk a
-hard sell, both readable as `in_budget` judgment calls with a stated
-reason — with no anchor at all, every price looks equally arbitrary. Not
-spec-mandated; revisit if a later phase's actual use of `budget_usd` proves
-this wrong.
+### Upgrade baseline (§7.2)
 
-### SPEC GAP-FILL — required-feature filtering
+§7.2 says the user's current product "is researched" and enters scoring
+with `role="baseline_current"" — but not by Phase 0, which runs before any
+model call exists in the pipeline. This phase's entire contract for the
+upgrade path is `current_model: str | None`; the actual research of that
+product into a scored `Product` is a downstream phase's job.
 
-CLAUDE.md's step-3 line is explicit: "Required features become filters, not
-preferences." §7 item 3 states the same rule but never specifies a
-mechanism, and `Product` (§4) has no dedicated features field — the closest
-analog is `specs: dict[str, SourcedValue]`. `filter_by_required_features`
-below matches a required feature by case-insensitive substring against
-either a spec's key or its extracted value, since a real extractor might
-tag a feature either way (e.g. key "Bluetooth" vs. value "Bluetooth 5.0"
-under a generic key like "connectivity"). This is deliberately permissive:
-a false-positive match is the safer failure mode than wrongly excluding a
-real product on a technicality. This function is pure and callable now, but
-nothing calls it until Discovery/Extraction exist (step 5) — no `Product`
-list exists this early in the pipeline.
+### Required features (§7.1 item 3)
+
+"Required features — filters, not preferences." Phase 0's job is capture
+only: store the strings in `IntakeAnswers.required_features`. Downstream
+representative-selection (EXTRACTION, per §1's "representatives chosen
+against requirements") is where the filtering actually happens.
+`filter_by_required_features` below is a pure utility for that later
+consumer — nothing in this phase calls it, since no `Product` list exists
+this early in the pipeline. It matches a required feature by
+case-insensitive substring against either a spec's key or its extracted
+value, since a real extractor might tag a feature either way (e.g. key
+"Bluetooth" vs. value "Bluetooth 5.0" under a generic key like
+"connectivity"). Deliberately permissive: a false-positive match is the
+safer failure mode than wrongly excluding a real product on a technicality.
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import BaseModel, Field, model_validator
+import re
+from pathlib import Path
 
 from product_scout.io.port import QuestionPort
-from product_scout.models import Product
+from product_scout.models import IntakeAnswers, Location, Product
+from product_scout.settings import load, save, set_value
 
+_YES_TOKENS = frozenset(("y", "yes"))
+_NO_TOKENS = frozenset(("n", "no"))
 
-class Intake(BaseModel):
-    """Phase 0's output — see the module SPEC GAP-FILL note above."""
-
-    owns_current: bool
-    current_model: str | None  # required iff owns_current
-    budget_mode: Literal["hard_ceiling", "flexible", "no_limit"]
-    budget_usd: float | None = Field(default=None, gt=0)  # required iff not no_limit
-    required_features: list[str] = []
-    named_candidates: list[str] = []
-
-    @model_validator(mode="after")
-    def _current_model_matches_ownership(self) -> "Intake":
-        if self.owns_current and not self.current_model:
-            raise ValueError(
-                "Intake.current_model is required when owns_current=True (§7 item 1)."
-            )
-        if not self.owns_current and self.current_model:
-            raise ValueError(
-                "Intake.current_model must be None when owns_current=False "
-                f"(§7 item 1); got {self.current_model!r}."
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _budget_amount_matches_mode(self) -> "Intake":
-        if self.budget_mode == "no_limit" and self.budget_usd is not None:
-            raise ValueError(
-                "Intake.budget_usd must be None when budget_mode='no_limit' "
-                f"(§7 item 2); got {self.budget_usd!r}."
-            )
-        if self.budget_mode != "no_limit" and self.budget_usd is None:
-            raise ValueError(
-                "Intake.budget_usd is required when budget_mode != 'no_limit' "
-                "(§7 item 2) — including 'flexible', which needs an anchor "
-                "too; see the module SPEC GAP-FILL note."
-            )
-        return self
-
-
-_OWNERSHIP_OPTIONS = ["Yes, I'm upgrading", "No, this is a new purchase"]
-
-_BUDGET_OPTIONS = [
-    "Hard ceiling",
-    "Flexible if quality justifies it",
-    "No limit",
-]
-_BUDGET_MODE_BY_OPTION: dict[str, Literal["hard_ceiling", "flexible", "no_limit"]] = {
-    "Hard ceiling": "hard_ceiling",
-    "Flexible if quality justifies it": "flexible",
-    "No limit": "no_limit",
-}
+# §7.1 item 2: "a single numeric ceiling plus a free-text note... puts the
+# highest figure in the ceiling." One free-text question, parsed by regex —
+# not a multiple-choice budget-mode UI, which doesn't exist in
+# IntakeAnswers's schema at all.
+_NUMBER_PATTERN = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
+_NO_LIMIT_PATTERN = re.compile(r"\b(no limit|unlimited|no cap|n/a|none)\b", re.IGNORECASE)
 
 
 def _parse_list(raw: str) -> list[str]:
@@ -117,53 +77,99 @@ def _parse_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-async def _ask_budget_amount(port: QuestionPort) -> float:
-    """Loops until a positive number comes back — ask_text has no built-in
-    validation (§7's port contract), so the phase owns retry/feedback here.
+async def _ask_yes_no(port: QuestionPort, prompt: str) -> bool:
+    """Loops until a yes/no answer comes back. No escape hatch — Phase 0 has
+    none (§9.6's escape hatches are REFINE-specific)."""
+    while True:
+        raw = (await port.ask_text(prompt)).strip().lower()
+        if raw in _YES_TOKENS:
+            return True
+        if raw in _NO_TOKENS:
+            return False
+        prompt = f"{raw!r} — please answer yes or no."
+
+
+async def _ask_budget(port: QuestionPort) -> tuple[float | None, str]:
+    """§7.1 item 2. Returns (budget_ceiling, budget_note) — note is the raw
+    text verbatim (§4.0c: `# verbatim; §7.1`), ceiling is the highest dollar
+    figure found, or None if the text says there's no limit. Reprompts
+    (blank input included) until one of the two is found — Phase 0 has no
+    escape hatch to fall back on, so ambiguous answers just get clarified.
     """
-    prompt = "What's the dollar amount? (e.g. 500)"
+    prompt = (
+        "What's your budget? You can give a single number, a tiered "
+        "statement (e.g. 'under $220 for something good, $150 for "
+        "adequate'), or say 'no limit'."
+    )
     while True:
         raw = await port.ask_text(prompt)
-        try:
-            amount = float(raw)
-        except ValueError:
-            prompt = f"{raw!r} isn't a number. What's the dollar amount? (e.g. 500)"
-            continue
-        if amount <= 0:
-            prompt = "The amount must be greater than 0. What's the dollar amount?"
-            continue
-        return amount
+        numbers = [float(n.replace(",", "")) for n in _NUMBER_PATTERN.findall(raw)]
+        if numbers:
+            return max(numbers), raw.strip()
+        if _NO_LIMIT_PATTERN.search(raw):
+            return None, raw.strip()
+        prompt = (
+            f"{raw!r} didn't give me a number or 'no limit' — what's the "
+            "most you'd spend, or say 'no limit'?"
+        )
 
 
-async def run_intake(product_type: str, port: QuestionPort) -> Intake:
-    """Ask the four §7 questions, in order, and return the validated result.
+async def _ask_nonblank(port: QuestionPort, prompt: str) -> str:
+    while True:
+        raw = (await port.ask_text(prompt)).strip()
+        if raw:
+            return raw
+        prompt = f"That can't be blank — {prompt[0].lower()}{prompt[1:]}"
 
-    All `ask()` calls use `escape_hatch="none"` — the §9 two-attempt loop is
-    Phase 6/7-specific; these are fixed, deterministic questions asked
-    before any model call.
-    """
+
+async def _ask_location(port: QuestionPort, settings_path: Path | str | None) -> Location:
+    """§7.1 item 5 / §10.1: asked once if missing, written back, reused
+    silently. No country -> currency derivation is attempted (see module
+    docstring) — both are asked explicitly when missing."""
+    settings = load(settings_path)
+    if settings.location.has_location:
+        return Location(
+            country=settings.location.country,
+            currency=settings.location.currency,
+        )
+
+    country = (
+        await _ask_nonblank(port, "What country are you shopping from? (e.g. US, DE, GB)")
+    ).upper()
+    currency = (
+        await _ask_nonblank(
+            port, "What currency should prices be shown in? (e.g. USD, EUR, GBP)"
+        )
+    ).upper()
+
+    updated = set_value(settings, "location.country", country)
+    updated = set_value(updated, "location.currency", currency)
+    save(updated, settings_path)
+
+    return Location(country=country, currency=currency)
+
+
+async def run_intake(
+    product_type: str,
+    port: QuestionPort,
+    *,
+    settings_path: Path | str | None = None,
+) -> tuple[IntakeAnswers, Location]:
+    """Ask the five §7.1 questions, in order, and return the validated
+    result plus the resolved `Location` (a separate top-level `RunRecord`
+    field, not nested under `intake`)."""
     # 1. Ownership (§7 item 1) — gates KEEP_CURRENT downstream (§6.2, step 7).
-    ownership = await port.ask(
-        f"Do you already own a {product_type}?",
-        _OWNERSHIP_OPTIONS,
-        escape_hatch="none",
+    owns_current_version = await _ask_yes_no(
+        port, f"Do you already own a {product_type}? (yes/no)"
     )
-    owns_current = ownership == "Yes, I'm upgrading"
     current_model = None
-    if owns_current:
+    if owns_current_version:
         current_model = await port.ask_text(
             f"What's the current {product_type} model you own?"
         )
 
-    # 2. Budget (§7 item 2) — hard ceiling still yields an above-budget
-    # reference row later (§5.1); that enforcement is out of scope here.
-    budget_choice = await port.ask(
-        "What's your budget?", _BUDGET_OPTIONS, escape_hatch="none"
-    )
-    budget_mode = _BUDGET_MODE_BY_OPTION[budget_choice]
-    budget_usd = None
-    if budget_mode != "no_limit":
-        budget_usd = await _ask_budget_amount(port)
+    # 2. Budget (§7 item 2).
+    budget_ceiling, budget_note = await _ask_budget(port)
 
     # 3. Required features (§7 item 3) — filters, not preferences; see
     # filter_by_required_features below.
@@ -172,22 +178,26 @@ async def run_intake(product_type: str, port: QuestionPort) -> Intake:
     )
     required_features = _parse_list(features_raw)
 
-    # 4. Named candidates (§7 item 4) — enter the shortlist automatically
-    # once Discovery exists (step 5); captured here only.
+    # 4. Named candidates (§7 item 4) — enter the shortlist with identical
+    # treatment once Discovery/Extraction exist; captured here only.
     candidates_raw = await port.ask_text(
         "Any specific products you're already considering? "
         "(comma-separated, or leave blank for none)"
     )
-    named_candidates = _parse_list(candidates_raw)
+    candidates_under_consideration = _parse_list(candidates_raw)
 
-    return Intake(
-        owns_current=owns_current,
+    # 5. Location (§7 item 5 / §10.1) — only if not already in settings.
+    location = await _ask_location(port, settings_path)
+
+    intake = IntakeAnswers(
+        owns_current_version=owns_current_version,
         current_model=current_model,
-        budget_mode=budget_mode,
-        budget_usd=budget_usd,
+        budget_ceiling=budget_ceiling,
+        budget_note=budget_note,
         required_features=required_features,
-        named_candidates=named_candidates,
+        candidates_under_consideration=candidates_under_consideration,
     )
+    return intake, location
 
 
 def filter_by_required_features(
@@ -197,8 +207,8 @@ def filter_by_required_features(
 
     A product is kept only if every required feature matches — by
     case-insensitive substring — a spec key or its extracted value for that
-    product. See the module SPEC GAP-FILL note for why substring matching
-    was chosen. `required_features == []` is a no-op (returns `products`
+    product. See the module docstring for why substring matching was
+    chosen. `required_features == []` is a no-op (returns `products`
     unchanged).
     """
     if not required_features:
