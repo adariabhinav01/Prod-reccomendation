@@ -39,8 +39,8 @@ contains. Keep only checkboxes here.
 - [x] 2. `QuestionPort` + CLI port
 - [x] 3. Settings + `scout config`
 - [x] 4. Phase 0 intake
-- [ ] 5. Phase 1 SURVEY + clusters/dimensions + broadening interrupt
-- [ ] 6. Renderer against fixture data
+- [x] 5. Phase 1 SURVEY + clusters/dimensions + broadening interrupt
+- [x] 6. Renderer against fixture data
 - [ ] 7. Phase 2 REFINE
 - [ ] 8. Phase 3 EXTRACTION + ledger validation
 - [ ] 9. Phases 6a/6b + constraint enforcement

@@ -28,6 +28,14 @@ MODEL_HAIKU: str = "claude-haiku-4-5-20251001"  # phases 1-5
 MAX_DISCOVERY_SEARCHES: int = 8
 MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 6
 
+# SURVEY (build order step 5) does more per call than Discovery's shortlist
+# search — coverage assessment, clustering, dimension-building, and
+# secondhand-risk research all happen in the same pass (§8.1) — so it gets a
+# larger soft budget. No spec-given number exists for this; chosen the same
+# way MAX_DISCOVERY_SEARCHES was (a self-limit referenced in the prompt, not
+# yet mechanically enforced — see this module's docstring).
+MAX_SURVEY_SEARCHES: int = 12
+
 # §11 — read by every Haiku research phase (Discovery, Extraction, and
 # later Timing/Prior-Gen). Single source of truth for the skill's directory
 # name, shared by product_scout.skills.assert_skill_loaded() and every real

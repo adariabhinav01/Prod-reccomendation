@@ -52,6 +52,9 @@ class RunStore:
     def record_path(self, run_id: str) -> Path:
         return self.run_dir(run_id) / "record.json"
 
+    def report_path(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "report.html"
+
     def exists(self, run_id: str) -> bool:
         return self.record_path(run_id).exists()
 
@@ -65,6 +68,15 @@ class RunStore:
         tmp_path.replace(path)  # atomic on POSIX
         self.index.add_entry(record, run_path=run_dir)
         return path
+
+    def save_report(self, record: RunRecord) -> Path:
+        """Render and write `report.html` alongside `record.json` (build
+        order step 6). Thin delegation to `render/report.py`, imported
+        locally to avoid a module-level import cycle risk between `store`
+        and `render` — neither package needs the other at import time."""
+        from product_scout.render.report import write_html_report
+
+        return write_html_report(record, self.run_dir(record.run_id))
 
     def load(self, run_id: str) -> RunRecord:
         path = self.record_path(run_id)
