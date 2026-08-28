@@ -10,8 +10,14 @@ consistency check.
 import pytest
 from pydantic import ValidationError
 
-from product_scout.models import Product, SourcedValue, normalize_url
-from tests.conftest import make_dimension, make_product, make_run_record, make_survey_report
+from product_scout.models import IntakeAnswers, Product, SourcedValue, normalize_url
+from tests.conftest import (
+    make_dimension,
+    make_intake_answers,
+    make_product,
+    make_run_record,
+    make_survey_report,
+)
 
 
 # -- invariant 3: no source, no field -----------------------------------------
@@ -163,3 +169,16 @@ def test_run_record_round_trips_through_json():
     record = make_run_record()
     restored = record.model_validate_json(record.model_dump_json())
     assert restored == record
+
+
+# -- IntakeAnswers: owns_current_version/current_model coherence (§7 item 1) --
+
+
+def test_intake_answers_current_model_required_when_owns_current_version():
+    with pytest.raises(ValidationError):
+        make_intake_answers(owns_current_version=True, current_model=None)
+
+
+def test_intake_answers_current_model_must_be_none_when_not_owns_current_version():
+    with pytest.raises(ValidationError):
+        IntakeAnswers(owns_current_version=False, current_model="Old Widget")

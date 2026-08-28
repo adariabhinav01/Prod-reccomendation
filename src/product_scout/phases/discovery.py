@@ -66,7 +66,7 @@ from claude_agent_sdk import (
 )
 
 from product_scout import config
-from product_scout.phases.intake import Intake
+from product_scout.models import IntakeAnswers
 from product_scout.skills import assert_skill_loaded
 
 MAX_DISCOVERY_CANDIDATES: int = 8  # §0 — see module SPEC GAP-FILL note
@@ -139,7 +139,7 @@ def _parse_candidate_list(text: str) -> list[str]:
 
 async def run_discovery(
     product_type: str,
-    intake: Intake,
+    intake: IntakeAnswers,
     discoverer: Discoverer,
 ) -> list[str]:
     """§7 item 4: named candidates enter the shortlist automatically and get
@@ -152,7 +152,7 @@ async def run_discovery(
     genuinely different candidates to verify against real pages; collapsing
     them here would silently drop a real product.
     """
-    named = [c.strip() for c in intake.named_candidates if c.strip()]
+    named = [c.strip() for c in intake.candidates_under_consideration if c.strip()]
     discovered = await discoverer.discover(product_type)
 
     seen: set[str] = set()

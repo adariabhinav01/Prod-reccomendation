@@ -28,3 +28,8 @@ def test_web_port_ask_topic_raises_not_implemented():
 def test_web_port_offer_bailout_raises_not_implemented():
     with pytest.raises(NotImplementedError):
         asyncio.run(WebQuestionPort().offer_bailout())
+
+
+def test_web_port_ask_text_raises_not_implemented():
+    with pytest.raises(NotImplementedError):
+        asyncio.run(WebQuestionPort().ask_text("Q?"))

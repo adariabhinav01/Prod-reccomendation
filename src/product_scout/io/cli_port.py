@@ -208,6 +208,16 @@ class CLIQuestionPort:
         raw = self._input("[y/N] > ").strip().lower()
         return raw in ("y", "yes")
 
+    # -- ask_text: bare free-text prompt, no escape hatch (build order step 4) --
+
+    async def ask_text(self, prompt: str) -> str:
+        return await asyncio.to_thread(self._ask_text_sync, prompt)
+
+    def _ask_text_sync(self, prompt: str) -> str:
+        self._print()
+        self._print(prompt)
+        return self._input("> ").strip()
+
 
 def _combine_notes(*notes: str | None) -> str | None:
     present = [n for n in notes if n]

@@ -37,8 +37,8 @@ contains. Keep only checkboxes here.
 
 - [x] 1. Data model, store, checkpointing, `confidence.py` tests
 - [x] 2. `QuestionPort` + CLI port
-- [ ] 3. Settings + `scout config`
-- [ ] 4. Phase 0 intake
+- [x] 3. Settings + `scout config`
+- [x] 4. Phase 0 intake
 - [ ] 5. Phase 1 SURVEY + clusters/dimensions + broadening interrupt
 - [ ] 6. Renderer against fixture data
 - [ ] 7. Phase 2 REFINE

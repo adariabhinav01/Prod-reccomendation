@@ -38,3 +38,6 @@ class WebQuestionPort:
 
     async def offer_bailout(self) -> bool:
         raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def ask_text(self, prompt: str) -> str:
+        raise NotImplementedError(_NOT_IMPLEMENTED)
