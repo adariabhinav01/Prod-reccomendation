@@ -72,6 +72,29 @@ def normalize_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 GateAnswer = Literal["must_have", "must_avoid", "persuadable", "no_preference"]
 
+# Pulled out for the same reason as GateAnswer above: `phases/scoring.py`
+# (build order step 9) needs this exact vocabulary to type-check Opus's
+# proposed `role` re-assignments against, before any `Product` exists to
+# read the field off of.
+ProductRole = Literal[
+    "recommendation",
+    "baseline_current",
+    "reference_above_budget",
+    "reference_unavailable",
+    "reference_displaced",
+]
+
+# Same rationale as ProductRole above: `phases/synthesis.py` (build order
+# step 9) needs this exact vocabulary to type-check Opus's proposed verdict
+# action against, before `Verdict` itself is declared.
+VerdictAction = Literal[
+    "BUY",
+    "WAIT",
+    "CONSIDER_CHEAPER_CATEGORY",
+    "KEEP_CURRENT",
+    "INSUFFICIENT_EVIDENCE",
+]
+
 
 class SourcedValue(BaseModel):
     value: str
@@ -202,13 +225,7 @@ class Product(BaseModel):
     name: str
     brand: str
     generation: Literal["current", "prior"]
-    role: Literal[
-        "recommendation",
-        "baseline_current",
-        "reference_above_budget",
-        "reference_unavailable",
-        "reference_displaced",
-    ] = "recommendation"
+    role: ProductRole = "recommendation"
     cluster_key: str  # prior-gen INHERITS its sibling's key
     cluster_rationale: str
     strength_archetype: str  # free string; the 6-8-distinct/default-7 pool
@@ -247,13 +264,7 @@ class Scored(BaseModel):
 
 
 class Verdict(BaseModel):
-    action: Literal[
-        "BUY",
-        "WAIT",
-        "CONSIDER_CHEAPER_CATEGORY",
-        "KEEP_CURRENT",
-        "INSUFFICIENT_EVIDENCE",
-    ]
+    action: VerdictAction
     reasoning: str
     timing_note: str | None
 

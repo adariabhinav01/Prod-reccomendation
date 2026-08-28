@@ -48,3 +48,26 @@ RESEARCH_PROTOCOL_SKILL: str = "research-protocol"
 # assert_skill_loaded()/ClaudeAgentOptions(skills=[...]) contract as
 # RESEARCH_PROTOCOL_SKILL above.
 QUESTION_DESIGN_SKILL: str = "question-design"
+
+# §6 — read by Phases 6a SCORING and 6b SYNTHESIS (build order step 9). Same
+# assert_skill_loaded()/ClaudeAgentOptions(skills=[...]) contract as the two
+# skills above. CLAUDE.md invariant: "Running without recommendation-logic
+# produces plausible-looking garbage rather than an error" — this is the
+# skill that guards against exactly that on the two judgment phases.
+RECOMMENDATION_LOGIC_SKILL: str = "recommendation-logic"
+
+# §6.5 — read by Phase 4 TIMING (build order step 10), per §14's skill
+# table. Loaded ALONGSIDE RESEARCH_PROTOCOL_SKILL, not instead of it —
+# TIMING is still a Haiku research phase (WebSearch/WebFetch), so the
+# general source-tiering/conflict rules apply too; this skill adds only
+# §6.5's timing-specific content on top.
+MARKET_TIMING_SKILL: str = "market-timing"
+
+# §8.1/§12.3 — Phase 5 PRIOR-GEN (build order step 10) does the same kind
+# of research EXTRACTION does (find a product, fetch its manufacturer page
+# and reviews), just aimed at a predecessor rather than a named candidate,
+# so it gets a comparable soft budget to MAX_SURVEY_SEARCHES rather than
+# MAX_EXTRACTION_FETCHES_PER_PRODUCT's narrower per-product fetch count —
+# it has to search for the predecessor first, which extraction never does.
+MAX_TIMING_SEARCHES: int = 8
+MAX_PRIOR_GEN_SEARCHES: int = 10

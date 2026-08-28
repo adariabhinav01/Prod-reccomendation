@@ -15,6 +15,14 @@ def test_research_protocol_skill_actually_exists_in_this_repo():
     assert_skill_loaded(config.RESEARCH_PROTOCOL_SKILL)  # must not raise
 
 
+def test_recommendation_logic_skill_actually_exists_in_this_repo():
+    """Same guard as the research-protocol test above, for the skill
+    Phases 6a/6b (build order step 9) depend on — CLAUDE.md's invariant
+    that running without it "produces plausible-looking garbage rather
+    than an error" is exactly what this pins against regressing silently."""
+    assert_skill_loaded(config.RECOMMENDATION_LOGIC_SKILL)  # must not raise
+
+
 def test_missing_skill_raises_with_actionable_message(tmp_path):
     with pytest.raises(RuntimeError) as excinfo:
         assert_skill_loaded("nonexistent-skill", repo_root=tmp_path)

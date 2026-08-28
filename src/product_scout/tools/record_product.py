@@ -62,6 +62,31 @@ then `build_evidence_profile` computes the real one from that draft, and
 `model_copy(update={"evidence": ...})` produces the final `Product`. This
 mirrors `confidence.py`'s own two-step "provisional, then reassign"
 pattern rather than inventing a second one.
+
+### `build_product_from_args` is a public, reusable core (added build order
+### step 10)
+
+The validation body below — every §4.3 ledger check, the two-pass
+evidence construction above, invariant 6's cons check — used to live
+entirely inside the `record_product` tool closure. `phases/prior_gen.py`
+(build order step 10) needs the *exact same* validation contract applied
+to a prior-generation candidate parsed from a final JSON message rather
+than a live tool call (§3's own `PHASES` sample grants `prior_gen` no
+`record_product` tool, so there is no tool-call boundary to validate at).
+Rather than re-implement ~80 lines of invariant-critical logic a second
+time — the exact drift risk §4.3 itself warns about for `normalize_url`
+("reimplementing... would risk the two drifting apart") — this function
+is extracted as the shared, public core both call sites use.
+`build_product_from_args` is pure and side-effect-free (no `ProductSink`
+dependency): it returns `(Product, None)` on success or `(None,
+error_text)` on failure, with `error_text` identical to what
+`record_product`'s tool response always carried, so the tool wrapper below
+is now a thin adapter from that tuple to the MCP response-dict shape —
+existing tests, which only inspect the response dict, are unaffected by
+this refactor. `phases/prior_gen.py` gets no such retry loop (a single
+final message, not a live conversation), so it treats `None` as "drop this
+candidate, log one caveat" rather than re-prompting — see that module's
+docstring.
 """
 
 from __future__ import annotations
@@ -291,11 +316,123 @@ def _validate_sourced_value(
     return sourced_value, None
 
 
-def _rejection(text: str) -> dict[str, Any]:
-    return {
-        "content": [{"type": "text", "text": f"record_product rejected: {text}"}],
-        "is_error": True,
-    }
+def build_product_from_args(
+    args: dict[str, Any], survey: SurveyReport, ledger: FetchLedger
+) -> tuple[Product | None, str | None]:
+    """Validate `record_product`-shaped `args` and construct a `Product` —
+    every §4.3 ledger check, invariant 6's cons check, and the two-pass
+    evidence construction (§4.0d). See module docstring's "public,
+    reusable core" section for why this is a standalone function rather
+    than living inside the tool closure below.
+
+    Returns `(product, None)` on success or `(None, error_text)` on
+    failure, where `error_text` is the exact rejection message the
+    `record_product` tool has always returned (so callers needing that
+    live-retry framing — the tool wrapper below — get it verbatim; callers
+    without a retry loop, like `phases/prior_gen.py`, still get an
+    actionable, specific reason to log).
+    """
+    bad_fields: list[str] = []
+
+    # 1. specs — require a `fetched` ledger entry (§4.3: spec values
+    #    are facts, never judgment).
+    specs: dict[str, SourcedValue] = {}
+    for spec_name, raw in args["specs"].items():
+        sourced_value, error = _validate_sourced_value(
+            raw, ledger, require_fetched=True, label=f"specs[{spec_name!r}]"
+        )
+        if error:
+            bad_fields.append(error)
+        else:
+            specs[spec_name] = sourced_value  # type: ignore[assignment]
+
+    # 2. ownership_notes — judgment-bearing (§14): either access mode
+    #    admissible.
+    ownership_notes: list[SourcedValue] = []
+    for i, raw in enumerate(args.get("ownership_notes", [])):
+        sourced_value, error = _validate_sourced_value(
+            raw, ledger, require_fetched=False, label=f"ownership_notes[{i}]"
+        )
+        if error:
+            bad_fields.append(error)
+        else:
+            ownership_notes.append(sourced_value)  # type: ignore[arg-type]
+
+    # 3. price_source_url — require fetched, same tier as specs.
+    pricing_raw = args["pricing"]
+    price_source_url = pricing_raw.get("price_source_url", "")
+    if not ledger.is_admissible(price_source_url, require_fetched=True):
+        bad_fields.append(
+            f"pricing.price_source_url {_ledger_rejection_reason(ledger, price_source_url)}"
+        )
+
+    # 4. review_sources — bare URLs, judgment-bearing (used for
+    #    independent_review_count, §14): either access mode admissible.
+    for i, url in enumerate(args["review_sources"]):
+        if not ledger.is_admissible(url, require_fetched=False):
+            bad_fields.append(f"review_sources[{i}] {_ledger_rejection_reason(ledger, url)}")
+
+    if bad_fields:
+        return None, (
+            "record_product rejected — the following "
+            "field(s) are missing or not admissible: "
+            + "; ".join(bad_fields)
+            + ". Omit an unfixable field entirely (invariant 3: no "
+            "source, no field), or fetch the page and re-cite it "
+            "if you only searched, then call record_product again."
+        )
+
+    # 5. pricing / availability. Availability deliberately minimal —
+    #    see module docstring.
+    try:
+        pricing = PricingModel(**pricing_raw)
+    except ValidationError as e:
+        return None, f"record_product rejected: pricing: {e}"
+
+    availability = Availability(
+        sold_in_region=args["availability"]["sold_in_region"],
+        regional_names=[],
+        ships_to_region=None,
+        ships_from=None,
+        ships_from_signal=None,
+        ships_from_confidence=0.0,  # never model-supplied; invariant 4
+        import_caveats=[],
+    )
+
+    # 6. Draft Product with placeholder evidence, so
+    #    build_evidence_profile has something to derive from (§4.0d).
+    try:
+        draft = Product(
+            name=args["name"],
+            brand=args["brand"],
+            generation=args["generation"],
+            role=args.get("role", "recommendation"),
+            cluster_key=args["cluster_key"],
+            cluster_rationale=args["cluster_rationale"],
+            strength_archetype=args["strength_archetype"],
+            pricing=pricing,
+            availability=availability,
+            specs=specs,
+            pros=args["pros"],
+            cons=args["cons"],
+            ownership_notes=ownership_notes,
+            review_sources=args["review_sources"],
+            in_budget=args["in_budget"],
+            evidence=_PLACEHOLDER_EVIDENCE,
+        )
+    except ValidationError as e:
+        return None, (
+            f"record_product rejected: {e}. If this is about cons, add at least one "
+            "real drawback (invariant 4: every product needs at least one con)."
+        )
+
+    # 7. Real EvidenceProfile, computed in Python — never model-supplied
+    #    (invariant 4). This is what makes independent_review_count and
+    #    has_methodology_backed_source safe to drop from the schema
+    #    entirely rather than accept-then-ignore.
+    evidence = build_evidence_profile(draft, survey)
+    product = draft.model_copy(update={"evidence": evidence})
+    return product, None
 
 
 def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLedger):
@@ -317,114 +454,9 @@ def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLe
         RECORD_PRODUCT_SCHEMA,
     )
     async def record_product(args: dict[str, Any]) -> dict[str, Any]:
-        bad_fields: list[str] = []
-
-        # 1. specs — require a `fetched` ledger entry (§4.3: spec values
-        #    are facts, never judgment).
-        specs: dict[str, SourcedValue] = {}
-        for spec_name, raw in args["specs"].items():
-            sourced_value, error = _validate_sourced_value(
-                raw, ledger, require_fetched=True, label=f"specs[{spec_name!r}]"
-            )
-            if error:
-                bad_fields.append(error)
-            else:
-                specs[spec_name] = sourced_value  # type: ignore[assignment]
-
-        # 2. ownership_notes — judgment-bearing (§14): either access mode
-        #    admissible.
-        ownership_notes: list[SourcedValue] = []
-        for i, raw in enumerate(args.get("ownership_notes", [])):
-            sourced_value, error = _validate_sourced_value(
-                raw, ledger, require_fetched=False, label=f"ownership_notes[{i}]"
-            )
-            if error:
-                bad_fields.append(error)
-            else:
-                ownership_notes.append(sourced_value)  # type: ignore[arg-type]
-
-        # 3. price_source_url — require fetched, same tier as specs.
-        pricing_raw = args["pricing"]
-        price_source_url = pricing_raw.get("price_source_url", "")
-        if not ledger.is_admissible(price_source_url, require_fetched=True):
-            bad_fields.append(
-                f"pricing.price_source_url {_ledger_rejection_reason(ledger, price_source_url)}"
-            )
-
-        # 4. review_sources — bare URLs, judgment-bearing (used for
-        #    independent_review_count, §14): either access mode admissible.
-        for i, url in enumerate(args["review_sources"]):
-            if not ledger.is_admissible(url, require_fetched=False):
-                bad_fields.append(f"review_sources[{i}] {_ledger_rejection_reason(ledger, url)}")
-
-        if bad_fields:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "record_product rejected — the following "
-                            "field(s) are missing or not admissible: "
-                            + "; ".join(bad_fields)
-                            + ". Omit an unfixable field entirely (invariant 3: no "
-                            "source, no field), or fetch the page and re-cite it "
-                            "if you only searched, then call record_product again."
-                        ),
-                    }
-                ],
-                "is_error": True,
-            }
-
-        # 5. pricing / availability. Availability deliberately minimal —
-        #    see module docstring.
-        try:
-            pricing = PricingModel(**pricing_raw)
-        except ValidationError as e:
-            return _rejection(f"pricing: {e}")
-
-        availability = Availability(
-            sold_in_region=args["availability"]["sold_in_region"],
-            regional_names=[],
-            ships_to_region=None,
-            ships_from=None,
-            ships_from_signal=None,
-            ships_from_confidence=0.0,  # never model-supplied; invariant 4
-            import_caveats=[],
-        )
-
-        # 6. Draft Product with placeholder evidence, so
-        #    build_evidence_profile has something to derive from (§4.0d).
-        try:
-            draft = Product(
-                name=args["name"],
-                brand=args["brand"],
-                generation=args["generation"],
-                role=args.get("role", "recommendation"),
-                cluster_key=args["cluster_key"],
-                cluster_rationale=args["cluster_rationale"],
-                strength_archetype=args["strength_archetype"],
-                pricing=pricing,
-                availability=availability,
-                specs=specs,
-                pros=args["pros"],
-                cons=args["cons"],
-                ownership_notes=ownership_notes,
-                review_sources=args["review_sources"],
-                in_budget=args["in_budget"],
-                evidence=_PLACEHOLDER_EVIDENCE,
-            )
-        except ValidationError as e:
-            return _rejection(
-                f"{e}. If this is about cons, add at least one real drawback "
-                "(invariant 4: every product needs at least one con)."
-            )
-
-        # 7. Real EvidenceProfile, computed in Python — never model-supplied
-        #    (invariant 4). This is what makes independent_review_count and
-        #    has_methodology_backed_source safe to drop from the schema
-        #    entirely rather than accept-then-ignore.
-        evidence = build_evidence_profile(draft, survey)
-        product = draft.model_copy(update={"evidence": evidence})
+        product, error_text = build_product_from_args(args, survey, ledger)
+        if product is None:
+            return {"content": [{"type": "text", "text": error_text}], "is_error": True}
 
         sink.add(product)
         return {
@@ -432,7 +464,7 @@ def make_record_product(sink: ProductSink, survey: SurveyReport, ledger: FetchLe
             "structuredContent": {
                 "recorded": True,
                 "name": product.name,
-                "confidence": evidence.confidence,
+                "confidence": product.evidence.confidence,
             },
         }
 
