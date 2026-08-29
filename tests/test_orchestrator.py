@@ -285,6 +285,48 @@ def test_full_run_calls_every_phase_once_in_order_and_saves(tmp_path):
     assert record.skill_hashes == hash_required_skills(_REQUIRED_SKILLS)
 
 
+def test_explicit_run_id_kwarg_is_used_for_a_fresh_run(tmp_path):
+    """Web build order W3: the web layer must know a fresh run's id before
+    `run_pipeline` starts, to register it and redirect a client to
+    `/runs/{id}` without a race. `run_id=...` on the fresh-run branch is
+    the fix — confirm it's actually honored, not silently ignored in favor
+    of `generate_run_id()`."""
+    port, _ = make_port(INTAKE_SCRIPT)
+    store = RunStore(root=tmp_path / ".product-scout")
+    fakes = _happy_fakes()
+
+    record = run(
+        run_pipeline(
+            "standing desks", port, store,
+            settings_path=settings_path_with_location(tmp_path),
+            run_id="explicit-run-id-0001",
+            **fakes,
+        )
+    )
+
+    assert record.run_id == "explicit-run-id-0001"
+    assert store.exists("explicit-run-id-0001")
+
+
+def test_omitting_run_id_reproduces_generate_run_id_behavior(tmp_path):
+    """Zero behavior change for the CLI, which never passes `run_id` —
+    a fresh run still gets a `generate_run_id()`-shaped id."""
+    port, _ = make_port(INTAKE_SCRIPT)
+    store = RunStore(root=tmp_path / ".product-scout")
+    fakes = _happy_fakes()
+
+    record = run(
+        run_pipeline(
+            "standing desks", port, store,
+            settings_path=settings_path_with_location(tmp_path),
+            **fakes,
+        )
+    )
+
+    assert record.run_id != "explicit-run-id-0001"
+    assert record.run_id  # generate_run_id()'s own shape is covered by store/runs.py's tests
+
+
 def test_full_run_reports_progress_for_every_phase_in_order(tmp_path):
     """§16.2: 'the long research phases emit per-phase progress' — checked
     here for all 9 phases, not just the research-heavy ones, since

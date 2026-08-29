@@ -27,6 +27,7 @@ from product_scout.models import (
     TopicAnswer,
     Verdict,
 )
+from product_scout.io.web_port import PendingQuestion
 from product_scout.phases.refine import RawTopicPrompt
 from product_scout.settings import (
     DisplaySettings,
@@ -337,6 +338,15 @@ def make_run_record(**overrides) -> RunRecord:
 @pytest.fixture
 def run_record_factory():
     return make_run_record
+
+
+def make_pending_question(**overrides) -> PendingQuestion:
+    """Defaults to a `kind="topic"` question wrapping `make_topic_prompt()`
+    — override `kind` (and swap in `question`/`options`/`escape_hatch` or
+    `prompt`) for the other three variants."""
+    defaults = dict(kind="topic", topic=make_topic_prompt())
+    defaults.update(overrides)
+    return PendingQuestion(**defaults)
 
 
 def make_settings(**overrides) -> Settings:
