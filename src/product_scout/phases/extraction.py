@@ -50,7 +50,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from product_scout import config
 from product_scout.hooks.budget import (
@@ -59,6 +59,7 @@ from product_scout.hooks.budget import (
     cost_cap_pre_tool_use_matchers,
 )
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.progress import ProgressFn, format_result_progress, progress_hook_matchers
 from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
@@ -117,6 +118,7 @@ class Extractor(Protocol):
         location: Location,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> list[Product]: ...
 
 
@@ -129,6 +131,7 @@ async def run_extraction(
     low_evidence_mode: bool,
     budget: RunBudget,
     extractor: Extractor,
+    progress: ProgressFn | None = None,
 ) -> list[Product]:
     """Thin by design. Short-circuits to `[]` without calling the
     extractor when there's nothing to extract, so an empty shortlist never
@@ -151,7 +154,8 @@ async def run_extraction(
     if not candidates:
         return []
     return await extractor.extract(
-        product_type, candidates, survey, ledger, location, low_evidence_mode, budget
+        product_type, candidates, survey, ledger, location, low_evidence_mode, budget,
+        progress=progress,
     )
 
 
@@ -178,6 +182,7 @@ class SdkExtractor:
         location: Location,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> list[Product]:
         # §3: "add a startup assertion that skills actually loaded — fail
         # loudly rather than silently running without the recommendation
@@ -185,7 +190,9 @@ class SdkExtractor:
         assert_skill_loaded(config.RESEARCH_PROTOCOL_SKILL)
 
         sink = ListProductSink()
-        scout_server = build_scout_server(sink, survey, ledger, location, low_evidence_mode)
+        scout_server = build_scout_server(
+            sink, survey, ledger, location, low_evidence_mode, progress
+        )
         prompt = EXTRACTION_PROMPT_TEMPLATE.format(
             product_type=product_type,
             max_fetches_per_product=config.MAX_EXTRACTION_FETCHES_PER_PRODUCT,
@@ -204,13 +211,19 @@ class SdkExtractor:
                 "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
                 + cost_cap_pre_tool_use_matchers(budget),
                 "PostToolUse": ledger_hook_matchers(ledger)
-                + cost_cap_post_tool_use_matchers(budget),
+                + cost_cap_post_tool_use_matchers(budget)
+                + progress_hook_matchers(progress),
             },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 
-        async for _message in query(prompt=prompt, options=options):
-            pass  # side effects land in `sink` via record_product; nothing
-            # to collect from the message stream itself
+        async for message in query(prompt=prompt, options=options):
+            # side effects land in `sink` via record_product; nothing else
+            # to collect from the message stream — except the terminal
+            # ResultMessage, whose terminal_reason/num_turns is otherwise
+            # the one signal this phase has for "why did nothing come
+            # back" (§16.2).
+            if isinstance(message, ResultMessage) and progress:
+                await progress(format_result_progress(message))
 
         return sink.products

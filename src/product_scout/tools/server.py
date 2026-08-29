@@ -12,6 +12,7 @@ from __future__ import annotations
 from claude_agent_sdk import McpSdkServerConfig, create_sdk_mcp_server
 
 from product_scout.hooks.ledger import FetchLedger
+from product_scout.hooks.progress import ProgressFn
 from product_scout.models import Location, SurveyReport
 from product_scout.tools.record_product import ProductSink, make_record_product
 
@@ -22,16 +23,17 @@ def build_scout_server(
     ledger: FetchLedger,
     location: Location,
     low_evidence_mode: bool,
+    progress: ProgressFn | None = None,
 ) -> McpSdkServerConfig:
     """Wire `record_product` (writing into `sink`, evidence-scored against
     `survey`, §4.3-validated against `ledger`, §10.3-gated against
-    `location`, §8.3/§14-gated against `low_evidence_mode`) into the
-    `scout` server.
+    `location`, §8.3/§14-gated against `low_evidence_mode`, §16.2-ticked
+    against `progress`) into the `scout` server.
 
     Referenced on the wire as `mcp__scout__record_product`, matching §3's
     `allowed_tools` entries.
     """
     return create_sdk_mcp_server(
         name="scout",
-        tools=[make_record_product(sink, survey, ledger, location, low_evidence_mode)],
+        tools=[make_record_product(sink, survey, ledger, location, low_evidence_mode, progress)],
     )

@@ -92,7 +92,7 @@ from __future__ import annotations
 import json
 from typing import Protocol, runtime_checkable
 
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
 from pydantic import BaseModel
 
 from product_scout import config
@@ -102,6 +102,7 @@ from product_scout.hooks.budget import (
     cost_cap_pre_tool_use_matchers,
 )
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.progress import ProgressFn, format_result_progress, progress_hook_matchers
 from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import TimingAssessment
 from product_scout.skills import assert_skill_loaded
@@ -144,6 +145,7 @@ class TimingResearcher(Protocol):
         ledger: FetchLedger,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> TimingAssessment: ...
 
 
@@ -184,12 +186,13 @@ async def run_timing(
     low_evidence_mode: bool,
     budget: RunBudget,
     researcher: TimingResearcher,
+    progress: ProgressFn | None = None,
 ) -> TimingOutcome:
     """Run Phase 4 end to end: research (one Haiku call), then enforce
     §6.5's basis discipline in Python. No gate, no interrupt, no re-prompt
     loop — see module docstring on why this phase doesn't have one."""
     assessment = await researcher.research(
-        product_type, product_names, ledger, low_evidence_mode, budget
+        product_type, product_names, ledger, low_evidence_mode, budget, progress=progress
     )
     assessment, caveats = _enforce_basis_discipline(assessment)
     return TimingOutcome(timing=assessment, caveats=caveats)
@@ -245,6 +248,7 @@ class SdkTimingResearcher:
         ledger: FetchLedger,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> TimingAssessment:
         # §3: fail loudly before spending anything if either skill isn't
         # there to be loaded.
@@ -267,13 +271,18 @@ class SdkTimingResearcher:
                 "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
                 + cost_cap_pre_tool_use_matchers(budget),
                 "PostToolUse": ledger_hook_matchers(ledger)  # §4.3 population, not validation
-                + cost_cap_post_tool_use_matchers(budget),
+                + cost_cap_post_tool_use_matchers(budget)
+                + progress_hook_matchers(progress),
             },
             skills=[config.RESEARCH_PROTOCOL_SKILL, config.MARKET_TIMING_SKILL],
         )
 
         final_text = ""
         async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                if progress:
+                    await progress(format_result_progress(message))
+                continue
             if not isinstance(message, AssistantMessage):
                 continue
             content = message.content

@@ -160,7 +160,7 @@ class _FrozenSurveyor:
     def __init__(self, raw: RawSurvey):
         self._raw = raw
 
-    async def survey(self, product_type, location, ledger, budget) -> RawSurvey:
+    async def survey(self, product_type, location, ledger, budget, progress=None) -> RawSurvey:
         return self._raw
 
 
@@ -168,7 +168,10 @@ class _FrozenExtractor:
     def __init__(self, products: list[Product]):
         self._products = products
 
-    async def extract(self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget):
+    async def extract(
+        self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget,
+        progress=None,
+    ):
         return self._products
 
 
@@ -176,7 +179,9 @@ class _FrozenTimingResearcher:
     def __init__(self, assessment: TimingAssessment):
         self._assessment = assessment
 
-    async def research(self, product_type, product_names, ledger, low_evidence_mode, budget) -> TimingAssessment:
+    async def research(
+        self, product_type, product_names, ledger, low_evidence_mode, budget, progress=None
+    ) -> TimingAssessment:
         return self._assessment
 
 
@@ -184,7 +189,7 @@ class _FrozenPriorGenResearcher:
     def __init__(self, raw: RawPriorGen):
         self._raw = raw
 
-    async def research(self, seeds, ledger, low_evidence_mode, budget) -> RawPriorGen:
+    async def research(self, seeds, ledger, low_evidence_mode, budget, progress=None) -> RawPriorGen:
         return self._raw
 
 
@@ -205,9 +210,9 @@ class _RecordingSurveyor:
         self.raw: RawSurvey | None = None
         self.ledger: FetchLedger | None = None
 
-    async def survey(self, product_type, location, ledger, budget) -> RawSurvey:
+    async def survey(self, product_type, location, ledger, budget, progress=None) -> RawSurvey:
         self.ledger = ledger
-        self.raw = await self._real.survey(product_type, location, ledger, budget)
+        self.raw = await self._real.survey(product_type, location, ledger, budget, progress=progress)
         return self.raw
 
 
@@ -217,10 +222,14 @@ class _RecordingExtractor:
         self.products: list[Product] | None = None
         self.ledger: FetchLedger | None = None
 
-    async def extract(self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget):
+    async def extract(
+        self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget,
+        progress=None,
+    ):
         self.ledger = ledger
         self.products = await self._real.extract(
-            product_type, candidates, survey, ledger, location, low_evidence_mode, budget
+            product_type, candidates, survey, ledger, location, low_evidence_mode, budget,
+            progress=progress,
         )
         return self.products
 
@@ -230,8 +239,12 @@ class _RecordingTimingResearcher:
         self._real = real
         self.assessment: TimingAssessment | None = None
 
-    async def research(self, product_type, product_names, ledger, low_evidence_mode, budget) -> TimingAssessment:
-        self.assessment = await self._real.research(product_type, product_names, ledger, low_evidence_mode, budget)
+    async def research(
+        self, product_type, product_names, ledger, low_evidence_mode, budget, progress=None
+    ) -> TimingAssessment:
+        self.assessment = await self._real.research(
+            product_type, product_names, ledger, low_evidence_mode, budget, progress=progress
+        )
         return self.assessment
 
 
@@ -240,8 +253,8 @@ class _RecordingPriorGenResearcher:
         self._real = real
         self.raw: RawPriorGen | None = None
 
-    async def research(self, seeds, ledger, low_evidence_mode, budget) -> RawPriorGen:
-        self.raw = await self._real.research(seeds, ledger, low_evidence_mode, budget)
+    async def research(self, seeds, ledger, low_evidence_mode, budget, progress=None) -> RawPriorGen:
+        self.raw = await self._real.research(seeds, ledger, low_evidence_mode, budget, progress=progress)
         return self.raw
 
 

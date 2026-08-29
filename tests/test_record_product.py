@@ -82,11 +82,25 @@ def full_valid_args(**overrides) -> dict:
     return defaults
 
 
-def call_record_product(sink, ledger, args, *, survey=None, location=None, low_evidence_mode=False):
+def call_record_product(
+    sink, ledger, args, *, survey=None, location=None, low_evidence_mode=False, progress=None
+):
     tool_def = make_record_product(
-        sink, survey or make_survey_report(), ledger, location or make_location(), low_evidence_mode
+        sink, survey or make_survey_report(), ledger, location or make_location(),
+        low_evidence_mode, progress,
     )
     return run(tool_def.handler(args))
+
+
+class Recorder:
+    """Stand-in for `QuestionPort.report_progress` — see
+    tests/test_progress_hook.py, same shape."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def __call__(self, message: str) -> None:
+        self.messages.append(message)
 
 
 def default_ledger() -> FetchLedger:
@@ -596,3 +610,33 @@ def test_low_evidence_mode_threaded_to_confidence_clamp():
 
     assert unclamped > LOW_EVIDENCE_CONFIDENCE_CLAMP
     assert clamped == LOW_EVIDENCE_CONFIDENCE_CLAMP
+
+
+# -- §16.2 progress ticks: record_product isn't a WebFetch/WebSearch call,
+# so hooks/progress.py's PostToolUse matcher never sees it — ticked inline
+# here instead, straight from the one place that knows the outcome. -------
+
+
+def test_progress_ticks_on_successful_record():
+    sink = ListProductSink()
+    progress = Recorder()
+    call_record_product(sink, default_ledger(), full_valid_args(), progress=progress)
+    assert progress.messages == ["  recorded Widget Pro"]
+
+
+def test_progress_ticks_verbatim_error_text_on_rejection():
+    sink = ListProductSink()
+    ledger = make_ledger(fetched=[PRICE_URL], seen=[REVIEW_URL])  # SPEC_URL absent
+    progress = Recorder()
+    result = call_record_product(sink, ledger, full_valid_args(), progress=progress)
+    assert len(progress.messages) == 1
+    # Same text the tool itself returned — not re-wrapped or duplicated.
+    assert progress.messages[0] == f"  {result['content'][0]['text']}"
+
+
+def test_no_progress_fn_is_a_silent_no_op():
+    """`progress=None` (the default) never raises — every existing caller
+    that doesn't pass it keeps working unchanged."""
+    sink = ListProductSink()
+    result = call_record_product(sink, default_ledger(), full_valid_args())
+    assert result.get("is_error") is not True

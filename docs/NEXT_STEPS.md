@@ -23,7 +23,57 @@ before assuming it's still funded.
 
 ## What's left, in priority order
 
-### 1. Capture the other 4 golden-set cases (§17.1) — main remaining item
+### 1. Investigate: EXTRACTION returns zero products on rich/high-differentiation categories — do this before capturing the `rich` case
+
+Reproduced live, twice in a row, on "Pickleball Paddles" (`coverage=rich`,
+`differentiation=high`, 35 then 150 `estimated_product_count`): SURVEY
+succeeds, `_extraction_candidates()` hands EXTRACTION a full 12 real
+candidates, and EXTRACTION comes back with **zero** validated products —
+not a cost-cap truncation (`truncated_at_phase` is `null`, `RunBudget`
+never tripped) — so SCORING/SYNTHESIS correctly fall through to
+`INSUFFICIENT_EVIDENCE` on an empty shortlist. This is the same shape the
+"Resolved this session" note above (`ROW_CAP=12`,
+`MAX_EXTRACTION_FETCHES_PER_PRODUCT` 6→4) targeted for the standing-desks
+failure — worth checking whether that fix actually holds for `rich`
+categories in general, or just happened to fix standing desks.
+
+New progress-tick instrumentation landed this session specifically to
+chase this (`hooks/progress.py`'s `PostToolUse` ticks on every
+`WebFetch`/`WebSearch`; `tools/record_product.py` ticks on every
+`record_product` call, success or rejection; every research phase now
+also ticks `format_result_progress` — the terminal `ResultMessage`'s
+`terminal_reason`/`num_turns` — when its `query()` call ends). One live
+rerun with this instrumentation (second Pickleball Paddles attempt) showed
+EXTRACTION making 20 real `WebFetch` calls and **zero** `record_product`
+calls of any kind — not rejections, none at all. Several candidates (e.g.
+11six24 Power Series, Franklin C45 Dynasty, JOOLA Ben Johns Perseus) got
+exactly one clean manufacturer-page fetch and nothing else; meanwhile the
+model burned other fetches on search-result pages (`amazon.com/s?k=...`,
+site `?q=` search endpoints) rather than real product pages, and never
+circled back to call `record_product` for anything, including the easy
+candidates. The `terminal_reason` tick wasn't present yet for that run —
+next rerun will show it.
+
+**Next step:** rerun the same category (or any `rich`/high-differentiation
+category) and read the final tick per phase:
+- `terminal_reason=max_turns` (or similar cutoff) → confirms a turn-budget
+  problem: the model gets stuck chasing dead-end sources for hard
+  candidates and runs out of turns before recording anything, even the
+  easy ones. Fix is probably in `EXTRACTION_PROMPT_TEMPLATE`
+  (`phases/extraction.py`) — e.g. instruct it to call `record_product` for
+  each candidate as soon as it has enough, rather than working through all
+  12 before recording any.
+- `terminal_reason=completed` with the same zero-`record_product` outcome
+  → the model chose to stop on its own without recording anything, which
+  points at the extraction research-protocol skill needing a stronger
+  nudge rather than a budget fix.
+
+Resolve (or at least understand) this before spending money on the `rich`
+golden-set capture below — espresso machines is exactly this
+`coverage=rich` shape, and capturing it while this bug is live risks
+freezing a broken/empty case into the golden set.
+
+### 2. Capture the other 4 golden-set cases (§17.1) — main remaining item
 
 `eval/capture.py` (committed) is proven end-to-end for one category —
 adapt it for the remaining 4. Recommended categories, reasoned out in a
@@ -64,7 +114,7 @@ isolate a verification run to just the case(s) it actually needs by
 temporarily moving the others out of `eval/cases/` — most relevant for
 the regression test below, which only needs the `rich` case in play.
 
-### 2. Once all 5 exist
+### 3. Once all 5 exist
 
 - Run `scout eval --stable-only` for real, confirm all 5 pass.
 - **The prose-edit regression test, deferred this session** because no
@@ -85,7 +135,7 @@ the regression test below, which only needs the `rich` case in play.
   since it's never been run.
 - Flip CLAUDE.md's step 15 checkbox.
 
-### 3. §17.2 build-time verification items — not started, need a live run
+### 4. §17.2 build-time verification items — not started, need a live run
 
 - **Geo-redirect check (§10.6).** Fetch several known geo-redirecting
   retailers, observe what actually comes back. Can't be faked or unit
@@ -133,5 +183,8 @@ the regression test below, which only needs the `rich` case in play.
 - `eval/cases/software/` — the one captured case so far.
 - `src/product_scout/orchestrator.py` — `_extraction_candidates()`, now
   fixed.
+- `src/product_scout/hooks/progress.py` — new this session: per-tool-call
+  and per-phase `ResultMessage` progress ticks (§16.2); the diagnostic
+  instrumentation item 1 above depends on.
 - `docs/handoff.md` §17.1/§17.2 — the authoritative spec for all of this.
 - `CLAUDE.md` — checklist, the eleven invariants, commands.

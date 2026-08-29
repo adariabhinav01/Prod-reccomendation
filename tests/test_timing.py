@@ -26,7 +26,7 @@ class FakeTimingResearcher:
         self.calls: list[tuple[str, list[str], FetchLedger, bool, RunBudget]] = []
 
     async def research(
-        self, product_type, product_names, ledger, low_evidence_mode, budget
+        self, product_type, product_names, ledger, low_evidence_mode, budget, progress=None
     ) -> TimingAssessment:
         self.calls.append((product_type, product_names, ledger, low_evidence_mode, budget))
         return self._assessment

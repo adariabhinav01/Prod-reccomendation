@@ -120,6 +120,7 @@ from pydantic import ValidationError
 
 from product_scout.confidence import build_evidence_profile
 from product_scout.hooks.ledger import FetchLedger
+from product_scout.hooks.progress import ProgressFn
 from product_scout.location import (
     is_confirmed_cross_border,
     resolve_landed_pricing,
@@ -568,6 +569,7 @@ def make_record_product(
     ledger: FetchLedger,
     location: Location,
     low_evidence_mode: bool,
+    progress: ProgressFn | None = None,
 ):
     """Factory mirroring `phases/refine.py`'s `Refiner`-seam-style
     dependency injection. `survey` is needed for
@@ -577,7 +579,16 @@ def make_record_product(
     (build order step 12) gates §14's community-source-for-specs rule and
     §8.3's confidence clamp — all four are the *same* instances/values the
     rest of a live run uses, per `hooks/ledger.py`'s "run-scoped, not
-    phase-scoped" requirement."""
+    phase-scoped" requirement.
+
+    `progress` (§16.2, same seam as `hooks/progress.py`) reports one line
+    per `record_product` call, success or rejection — `record_product`
+    isn't a `WebFetch`/`WebSearch` call, so `hooks/progress.py`'s
+    `PostToolUse` matcher (`"WebFetch|WebSearch"`) never sees it; this is
+    ticked inline instead, straight from the one place that already knows
+    both the outcome and `error_text`'s exact wording (every `error_text`
+    returned below already starts with "record_product rejected", so this
+    reports it verbatim rather than re-wrapping it)."""
 
     @tool(
         "record_product",
@@ -594,9 +605,13 @@ def make_record_product(
             args, survey, ledger, location, low_evidence_mode
         )
         if product is None:
+            if progress:
+                await progress(f"  {error_text}")
             return {"content": [{"type": "text", "text": error_text}], "is_error": True}
 
         sink.add(product)
+        if progress:
+            await progress(f"  recorded {product.name}")
         return {
             "content": [{"type": "text", "text": f"Recorded {product.name}."}],
             "structuredContent": {

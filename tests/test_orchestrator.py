@@ -80,7 +80,7 @@ class FakeSurveyor:
         self._trip_budget = trip_budget
         self.calls: list[tuple] = []
 
-    async def survey(self, product_type, location, ledger, budget):
+    async def survey(self, product_type, location, ledger, budget, progress=None):
         self.calls.append((product_type, location))
         if self._trip_budget:
             budget.fetches_used = budget.max_fetches
@@ -103,7 +103,10 @@ class FakeExtractor:
         self._trip_budget = trip_budget
         self.calls: list[tuple] = []
 
-    async def extract(self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget):
+    async def extract(
+        self, product_type, candidates, survey, ledger, location, low_evidence_mode, budget,
+        progress=None,
+    ):
         self.calls.append((product_type, candidates, low_evidence_mode))
         if self._trip_budget:
             budget.fetches_used = budget.max_fetches
@@ -115,7 +118,7 @@ class FakeTimingResearcher:
         self._assessment = assessment
         self.calls: list[tuple] = []
 
-    async def research(self, product_type, product_names, ledger, low_evidence_mode, budget):
+    async def research(self, product_type, product_names, ledger, low_evidence_mode, budget, progress=None):
         self.calls.append((product_type, product_names, low_evidence_mode))
         return self._assessment
 
@@ -125,7 +128,7 @@ class FakePriorGenResearcher:
         self._raw = raw
         self.calls: list[tuple] = []
 
-    async def research(self, seeds, ledger, low_evidence_mode, budget):
+    async def research(self, seeds, ledger, low_evidence_mode, budget, progress=None):
         self.calls.append((seeds, low_evidence_mode))
         return self._raw
 

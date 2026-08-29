@@ -70,7 +70,12 @@ class FakeSurveyor:
         self.calls: list[tuple[str, Location]] = []
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
+        self,
+        product_type: str,
+        location: Location,
+        ledger: FetchLedger,
+        budget: RunBudget,
+        progress=None,
     ) -> RawSurvey:
         self.calls.append((product_type, location))
         return self._responses[product_type]
