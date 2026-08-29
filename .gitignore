@@ -18,5 +18,9 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+# scout eval scratch (RunStore artifacts + settings.toml from stable/live
+# eval runs) — never real user run history, safe to discard
+eval/.runs/
+
 # OS
 .DS_Store

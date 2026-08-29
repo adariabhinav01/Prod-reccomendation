@@ -48,7 +48,7 @@ contains. Keep only checkboxes here.
 - [x] 11. Location end to end
 - [x] 12. Low-evidence + commodity modes
 - [x] 13. Hooks, cost caps, truncation
-- [ ] 14. `rescore` + `history`
+- [x] 14. `rescore` + `history`
 - [ ] 15. Golden set (§17.1) — gates skill edits from here on
 
 ## Invariants

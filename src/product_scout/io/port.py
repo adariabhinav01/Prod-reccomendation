@@ -7,7 +7,7 @@ the terminal implementation built now, `web_port.py` the HTTP implementation
 stubbed for later. Invariant 9: "All user interaction routes through
 QuestionPort. No phase calls terminal input directly."
 
-### Four primitives, four different jobs
+### Five primitives, five different jobs
 
 `ask_choice` — a bare categorical question, N options plus one caller-supplied
 escape hatch string. Used for the §9.6 two-attempt "not sure" loop.
@@ -30,6 +30,15 @@ any `Dimension`/`SurveyReport` exists to gate or axis against. `ask_text`
 exists so `phases/intake.py` (build order step 4) has a primitive to ask
 plain questions on, doing its own deterministic parsing (yes/no, budget
 regex, CSV splitting) in Python — matching "no model calls" exactly.
+
+`report_progress` — one-way status text, no answer expected (§16.2: "the
+long research phases emit per-phase progress"; build order step 15's
+`scout research` wiring). Kept on this Protocol rather than a bare
+`print()` in `orchestrator.py` for the same reason every other method is
+here: a future `WebQuestionPort` needs to push this as an SSE/websocket
+event, not a terminal write, and invariant 9's "no phase calls terminal
+I/O directly" applies to status output for the identical reason it applies
+to interaction — the swap has to stay free.
 
 ### The two-attempt escape-hatch swap lives in the CALLER, not the port (§9.6)
 
@@ -132,3 +141,5 @@ class QuestionPort(Protocol):
     async def offer_bailout(self) -> bool: ...
 
     async def ask_text(self, prompt: str) -> str: ...
+
+    async def report_progress(self, message: str) -> None: ...

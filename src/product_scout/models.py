@@ -417,3 +417,4 @@ class RunRecord(BaseModel):  # <- persisted as JSON
     model_ids: dict[str, str]
     skill_hashes: dict[str, str]  # SHA-256 per SKILL.md; §16
     trusted_sources: list[str] = []  # §15 seam — always empty in v1
+    rescored_from: str | None = None  # original run_id, when this record came from `rescore`; §16

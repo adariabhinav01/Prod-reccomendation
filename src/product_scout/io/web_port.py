@@ -41,3 +41,6 @@ class WebQuestionPort:
 
     async def ask_text(self, prompt: str) -> str:
         raise NotImplementedError(_NOT_IMPLEMENTED)
+
+    async def report_progress(self, message: str) -> None:
+        raise NotImplementedError(_NOT_IMPLEMENTED)

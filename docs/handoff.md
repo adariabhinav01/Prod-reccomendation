@@ -475,6 +475,7 @@ class RunRecord(BaseModel):
     model_ids: dict[str, str]
     skill_hashes: dict[str, str]            # SHA-256 per SKILL.md; §16
     trusted_sources: list[str] = []
+    rescored_from: str | None = None        # original run_id, set by rescore; §16
 ```
 
 ### 4.0d The entire `EvidenceProfile` is derived
@@ -1305,7 +1306,7 @@ scout config set location.country DE
 scout eval [--stable-only]
 ```
 
-**`rescore`** loads the record, overrides named prices, re-runs **phases 6a/6b only**, re-renders. No searching, no fetching. Preserves the original, writes a linked new run.
+**`rescore`** loads the record, overrides named prices, re-runs **phases 6a/6b only**, re-renders. No searching, no fetching. Preserves the original, writes a linked new run — the new record's `rescored_from` field carries the original `run_id`.
 
 **Override semantics:** `in_budget`, `total_cost_1yr`, and `landed_price_native` all **recompute**. `price_observed_at` is set to the override time and `price_overridden = True`, so provenance stays honest — the price is user-asserted, not sourced, and the report says so.
 

@@ -27,6 +27,8 @@ from product_scout.phases.refine import (
     Refiner,
     _apply_gate,
     _established_lean,
+    _parse_topic_list_json,
+    _repair_flattened_topic,
     run_refine,
 )
 from tests.conftest import (
@@ -87,6 +89,9 @@ class FakeQuestionPort:
 
     async def ask_text(self, prompt):
         raise NotImplementedError("run_refine doesn't call ask_text in this build step")
+
+    async def report_progress(self, message):
+        pass  # run_refine doesn't call this; present only for QuestionPort conformance
 
 
 def _raw(name: str, satisfies: list[str] | None = None) -> RawTopicPrompt:
@@ -526,3 +531,70 @@ def test_survey_and_intake_passed_through_to_refiner_unchanged():
     run(run_refine(survey, intake, refiner, port))
 
     assert refiner.calls == [(survey, intake)]
+
+
+# -- _parse_topic_list_json: found live, build order step 15's golden-set
+# capture — Opus backslash-escaping an apostrophe inside a JSON string
+# ("don\'t") is not a legal JSON escape and made the whole array
+# unparseable. --------------------------------------------------------------
+
+
+def test_parse_topic_list_json_repairs_an_escaped_apostrophe():
+    raw = '[{"topic": "motors", "dimension_name": null, "gate_question": "q", "gate_description": "you don\\\'t need this", "axis": null, "free_text_prompt": "p", "satisfies_must_have": []}]'
+    parsed = _parse_topic_list_json(raw)
+    assert parsed is not None
+    assert parsed[0]["gate_description"] == "you don't need this"
+
+
+def test_parse_topic_list_json_is_a_no_op_when_there_is_nothing_to_repair():
+    raw = '[{"topic": "motors", "dimension_name": null, "gate_question": "q", "gate_description": "fine", "axis": null, "free_text_prompt": "p", "satisfies_must_have": []}]'
+    assert _parse_topic_list_json(raw) == _parse_topic_list_json(raw)  # deterministic
+    parsed = _parse_topic_list_json(raw)
+    assert parsed[0]["gate_description"] == "fine"
+
+
+def test_parse_topic_list_json_returns_none_on_genuinely_malformed_json():
+    assert _parse_topic_list_json('[{"topic": "unclosed"') is None
+
+
+def test_parse_topic_list_json_returns_none_on_empty_text():
+    assert _parse_topic_list_json("") is None
+    assert _parse_topic_list_json("   ") is None
+
+
+# -- _repair_flattened_topic: found live, build order step 15's golden-set
+# capture, reproduced on independent samples (including across all
+# REFINE_JSON_RETRY_MAX retries in one attempt — systematic, not
+# stochastic) — Opus flattens TopicPrompt's fields onto RawTopicPrompt
+# because they share the "topic" key name. ------------------------------
+
+
+def test_repair_flattened_topic_reconstructs_the_nested_shape():
+    flattened = {
+        "topic": "Motor configuration",
+        "dimension_name": "motor_count",
+        "gate_question": "q",
+        "gate_description": "d",
+        "axis": {"kind": "position", "low_label": "lo", "high_label": "hi", "why_this_matters": "w"},
+        "free_text_prompt": "p",
+        "satisfies_must_have": ["dual"],
+    }
+    repaired = _repair_flattened_topic(flattened)
+    assert repaired == {
+        "topic": {
+            "topic": "Motor configuration",
+            "dimension_name": "motor_count",
+            "gate_question": "q",
+            "gate_description": "d",
+            "axis": {"kind": "position", "low_label": "lo", "high_label": "hi", "why_this_matters": "w"},
+            "free_text_prompt": "p",
+        },
+        "satisfies_must_have": ["dual"],
+    }
+    # Round-trips through the real model.
+    RawTopicPrompt(**repaired)
+
+
+def test_repair_flattened_topic_is_a_no_op_on_the_correct_shape():
+    correct = make_raw_topic_prompt().model_dump()
+    assert _repair_flattened_topic(correct) == correct

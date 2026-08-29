@@ -99,10 +99,11 @@ stays exactly what this phase wrote.
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol, runtime_checkable
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from product_scout import config
 from product_scout.confidence import confidence_band, flip_point_eligible
@@ -712,6 +713,29 @@ async def run_scoring(
 # suite, consistent with SdkSurveyor/SdkExtractor/SdkRefiner).
 # ---------------------------------------------------------------------------
 
+# refine.py's SdkRefiner uses this identical bare-query/raw-JSON-from-text
+# pattern (allowed_tools=[], _try_json_loads + outermost-span fallback) and,
+# run live for the first time (build order step 15's golden-set capture),
+# needed two proactive fixes before it was reliable: Opus occasionally
+# backslash-escapes an apostrophe inside a JSON string (not a legal JSON
+# escape), and occasionally corrupts the brace nesting in a long response.
+# Applied here pre-emptively rather than waiting to independently
+# rediscover the identical failure against this identical architecture —
+# `RawScoring`/`RawProductScore` have no field that shares a name with its
+# own wrapper the way `RawTopicPrompt.topic`/`TopicPrompt.topic` did, so
+# refine.py's third fix (structural re-nesting) has no analogous root cause
+# here and isn't replicated.
+_INVALID_APOSTROPHE_ESCAPE = re.compile(r"\\'")
+
+# Bounded retry, same shape as REFINE_JSON_RETRY_MAX: a parse or schema
+# failure gets a fresh, independent sample rather than an immediate raise.
+# Orthogonal to SCORING_REPROMPT_MAX above — that outer loop re-prompts
+# WITH content feedback when Opus's judgment doesn't satisfy §5.1's
+# constraints; this inner one retries the unmodified prompt when a single
+# call didn't even return a well-formed RawScoring, which has no
+# content-specific feedback to give.
+SCORING_JSON_RETRY_MAX: int = 2
+
 _UNPARSED = object()
 
 
@@ -730,6 +754,7 @@ def _parse_scoring_json(text: str) -> dict | None:
     text = text.strip()
     if not text:
         return None
+    text = _INVALID_APOSTROPHE_ESCAPE.sub("'", text)
 
     parsed = _try_json_loads(text)
     if parsed is _UNPARSED:
@@ -899,20 +924,30 @@ class SdkScorer:
         )
 
         final_text = ""
-        async for message in query(prompt=prompt, options=options):
-            if not isinstance(message, AssistantMessage):
-                continue
-            content = message.content
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if isinstance(block, TextBlock):
-                    final_text = block.text  # keep overwriting; last wins
+        parsed = None
+        for _attempt in range(SCORING_JSON_RETRY_MAX + 1):  # first try + retries
+            final_text = ""
+            async for message in query(prompt=prompt, options=options):
+                if not isinstance(message, AssistantMessage):
+                    continue
+                content = message.content
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, TextBlock):
+                        final_text = block.text  # keep overwriting; last wins
 
-        parsed = _parse_scoring_json(final_text)
-        if parsed is None:
-            raise RuntimeError(
-                "scout-scorer's final message did not contain a parseable "
-                f"JSON object: {final_text!r}"
-            )
-        return RawScoring(**parsed)
+            parsed = _parse_scoring_json(final_text)
+            if parsed is None:
+                continue
+            try:
+                return RawScoring(**parsed)
+            except ValidationError:
+                parsed = None
+                continue
+
+        raise RuntimeError(
+            "scout-scorer's final message did not contain a parseable, "
+            f"schema-valid JSON object after {SCORING_JSON_RETRY_MAX + 1} "
+            f"attempt(s): {final_text!r}"
+        )

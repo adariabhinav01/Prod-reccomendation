@@ -218,6 +218,12 @@ class CLIQuestionPort:
         self._print(prompt)
         return self._input("> ").strip()
 
+    # -- report_progress: §16.2 per-phase status, no answer expected -------
+
+    async def report_progress(self, message: str) -> None:
+        self._print()
+        self._print(message)
+
 
 def _combine_notes(*notes: str | None) -> str | None:
     present = [n for n in notes if n]

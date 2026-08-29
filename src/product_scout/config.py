@@ -32,7 +32,12 @@ reads or stores the key itself.
 from __future__ import annotations
 
 MODEL_HAIKU: str = "claude-haiku-4-5-20251001"  # phases 1-5
-MODEL_OPUS: str = "claude-opus-4-5-20260101"  # phases 2, 6a, 6b
+MODEL_OPUS: str = "claude-opus-5"  # phases 2, 6a, 6b — current-gen Opus 5 ships no
+# date suffix (unlike Haiku 4.5 above, still on a dated snapshot); the previous
+# value ("claude-opus-4-5-20260101") was stale and rejected outright by the API
+# ("There's an issue with the selected model... It may not exist or you may not
+# have access to it") — caught live during build order step 15's golden-set
+# capture, the first time this constant was ever exercised against a real key.
 
 MAX_DISCOVERY_SEARCHES: int = 8
 MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 6
