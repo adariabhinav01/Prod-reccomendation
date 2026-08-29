@@ -51,6 +51,9 @@ contains. Keep only checkboxes here.
 - [x] 14. `rescore` + `history`
 - [ ] 15. Golden set (§17.1) — gates skill edits from here on
 
+Step 15 is in progress (1/5 categories captured) — see `docs/NEXT_STEPS.md`
+for what's left, in priority order, before starting new work.
+
 ## Invariants
 
 Eleven rules that silently break the design if violated. Check against these before
