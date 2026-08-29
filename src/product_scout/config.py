@@ -40,7 +40,21 @@ MODEL_OPUS: str = "claude-opus-5"  # phases 2, 6a, 6b — current-gen Opus 5 shi
 # capture, the first time this constant was ever exercised against a real key.
 
 MAX_DISCOVERY_SEARCHES: int = 8
-MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 6
+
+# Was 6 — cut to 4 (build order step 15's cost-optimization pass) after
+# the `claude-api` skill's methodology flagged this as the single largest
+# component of the whole run's fetch budget: with EXTRACTION's candidate
+# list now capped at ROW_CAP=12 (see orchestrator.py's
+# `_extraction_candidates`), this one constant alone used to drive
+# MAX_EXTRACTION_FETCHES_PER_PRODUCT(6) x 12 = 72 of MAX_RUN_FETCHES(120)'s
+# 120 fetches — roughly 60% of the entire run's budget. Fewer sources per
+# product is a small, honestly-absorbed quality cost, not a silent one:
+# it feeds directly into confidence.py's §4.0a/§4.0b corroboration ratio,
+# which turns thinner evidence into a lower confidence band rather than a
+# wrong spec (CLAUDE.md invariants 4/5) — unlike cutting Opus judgment on
+# SCORING/SYNTHESIS, which would be a real quality loss, this only makes
+# the app say "less confident" more often when corroboration is thinner.
+MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 4
 
 # SURVEY (build order step 5) does more per call than Discovery's shortlist
 # search — coverage assessment, clustering, dimension-building, and
@@ -89,9 +103,11 @@ MAX_PRIOR_GEN_SEARCHES: int = 10
 # above what a full run can realistically spend on each side, since this is
 # meant to rarely bind (same spirit as the low-evidence `0.75` clamp and
 # `degraded_modes.COMMODITY_CATALOG_FLOOR`): EXTRACTION alone can reach
-# roughly MAX_EXTRACTION_FETCHES_PER_PRODUCT(6) x up to 12 candidates
-# (§5.1's row-cap ceiling) = ~72 fetches; MAX_RUN_FETCHES leaves headroom
-# above that plus SURVEY/TIMING/PRIOR_GEN's own incidental fetches.
+# roughly MAX_EXTRACTION_FETCHES_PER_PRODUCT(4) x up to 12 candidates
+# (§5.1's row-cap ceiling, now mechanically enforced by
+# `orchestrator.py`'s `_extraction_candidates`) = ~48 fetches;
+# MAX_RUN_FETCHES leaves generous headroom above that plus SURVEY/TIMING/
+# PRIOR_GEN's own incidental fetches.
 # MAX_SURVEY_SEARCHES(12) + MAX_TIMING_SEARCHES(8) + MAX_PRIOR_GEN_SEARCHES(10)
 # = 30; MAX_RUN_SEARCHES leaves headroom above that. Enforced by
 # `hooks/budget.py`'s `RunBudget`, wired by `orchestrator.py` (build order
