@@ -81,7 +81,18 @@ with "no real caller (`orchestrator.py`) exists yet":
    picks) with the `exemplar_products` of every `Cluster` REFINE's
    interview left in `RefineOutcome.surviving_clusters` — i.e. only
    clusters the interview didn't rule out contribute candidates, which is
-   the entire point of running REFINE before EXTRACTION (§1).
+   the entire point of running REFINE before EXTRACTION (§1). Capped at
+   `ROW_CAP` (§5.1's own row ceiling — EXTRACTION never needs to research
+   more candidates than SCORING could ever keep) via round-robin across
+   surviving clusters rather than truncation in cluster order: a category
+   that survives REFINE with many clusters (standing desks, live-verified,
+   surveyed into 6-7) would otherwise let EXTRACTION's per-candidate fetch
+   allowance burn the whole run's shared budget before TIMING/PRIOR-GEN/
+   SCORING/SYNTHESIS ever ran. Round-robin means every surviving cluster
+   contributes at least one candidate before any cluster contributes a
+   second, so the cap can't silently starve clusters REFINE's interview
+   chose to keep. Emits a caveat, never silent, when the cap actually
+   drops an exemplar.
 2. **`intake.filter_by_required_features`.** `phases/extraction.py`'s own
    docstring names this as unwired cross-cutting logic "with a home later."
    Applied immediately after EXTRACTION returns, before anything else
@@ -108,7 +119,7 @@ from product_scout.phases.prior_gen import (
     run_prior_gen,
 )
 from product_scout.phases.refine import RefineOutcome, Refiner, SdkRefiner, run_refine
-from product_scout.phases.scoring import ScoringOutcome, Scorer, SdkScorer, run_scoring
+from product_scout.phases.scoring import ROW_CAP, ScoringOutcome, Scorer, SdkScorer, run_scoring
 from product_scout.phases.survey import SurveyOutcome, Surveyor, SdkSurveyor, run_survey
 from product_scout.phases.synthesis import SdkSynthesizer, SynthesisOutcome, Synthesizer, run_synthesis
 from product_scout.phases.timing import (
@@ -176,17 +187,46 @@ def _load_if_resuming(run_store: RunStore, run_id: str, resume: bool, phase: str
     return run_store.load_checkpoint(run_id, phase)
 
 
-def _extraction_candidates(survey, refine_outcome, intake) -> list[str]:
+def _extraction_candidates(survey, refine_outcome, intake) -> tuple[list[str], str | None]:
     """See module docstring point 1. Order-preserving, deduped (first
     occurrence wins) — a user-named candidate that also happens to be a
-    surviving cluster's exemplar is researched once, not twice."""
-    exemplar_candidates = [
-        name
+    surviving cluster's exemplar is researched once, not twice. Capped at
+    `ROW_CAP`: user-named candidates are kept unconditionally, then one
+    exemplar at a time is round-robined off each surviving cluster's queue
+    until either every queue is empty or the cap is reached — so a single
+    exemplar-heavy cluster can't exhaust the cap and starve the rest.
+    Returns `(candidates, caveat)`; `caveat` is `None` unless the cap
+    actually dropped an exemplar that would otherwise have been
+    researched."""
+    kept = list(dict.fromkeys(intake.candidates_under_consideration))
+    queues = [
+        list(cluster.exemplar_products)
         for cluster in survey.clusters
         if cluster.key in refine_outcome.surviving_clusters
-        for name in cluster.exemplar_products
     ]
-    return list(dict.fromkeys([*intake.candidates_under_consideration, *exemplar_candidates]))
+    dropped = 0
+    while any(queues):
+        progressed = False
+        for queue in queues:
+            if not queue:
+                continue
+            progressed = True
+            name = queue.pop(0)
+            if name in kept:
+                continue  # dedup — not a drop, just already present
+            if len(kept) < ROW_CAP:
+                kept.append(name)
+            else:
+                dropped += 1
+        if not progressed:
+            break
+    caveat = None
+    if dropped:
+        caveat = (
+            f"EXTRACTION candidate list capped at {ROW_CAP} (§5.1's row ceiling) — "
+            f"{dropped} additional exemplar(s) from surviving clusters were not researched."
+        )
+    return kept, caveat
 
 
 def _looks_like_a_product_name(text: str, product_names: set[str]) -> str | None:
@@ -393,7 +433,9 @@ async def run_pipeline(
                 "before this phase could run; no products were researched."
             )
         else:
-            candidates = _extraction_candidates(survey, refine_outcome, intake)
+            candidates, cap_caveat = _extraction_candidates(survey, refine_outcome, intake)
+            if cap_caveat is not None:
+                raw_caveats.append(cap_caveat)
             products = await run_extraction(
                 survey_outcome.product_type, candidates, survey, ledger, location,
                 survey_outcome.low_evidence_mode, budget, extractor,

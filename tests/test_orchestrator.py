@@ -24,7 +24,7 @@ from product_scout.orchestrator import (
 from product_scout.io.cli_port import CLIQuestionPort
 from product_scout.phases.prior_gen import RawPriorGen
 from product_scout.phases.refine import RefineOutcome
-from product_scout.phases.scoring import RawProductScore, RawScoring
+from product_scout.phases.scoring import ROW_CAP, RawProductScore, RawScoring
 from product_scout.phases.survey import RawSurvey, SurveyOutcome
 from product_scout.phases.synthesis import RawSynthesis
 from product_scout.render.report import render_html
@@ -547,9 +547,10 @@ def test_extraction_candidates_unions_user_candidates_and_surviving_exemplars():
     refine_outcome = RefineOutcome(topics=[], surviving_clusters={"mid-tier"}, caveats=[])
     intake = make_intake_answers(candidates_under_consideration=["User's Pick"])
 
-    candidates = _extraction_candidates(survey, refine_outcome, intake)
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
 
     assert candidates == ["User's Pick", "Widget Pro"]  # "budget" cluster didn't survive
+    assert caveat is None
 
 
 def test_extraction_candidates_dedupes_first_occurrence_wins():
@@ -557,9 +558,87 @@ def test_extraction_candidates_dedupes_first_occurrence_wins():
     refine_outcome = RefineOutcome(topics=[], surviving_clusters={"mid-tier"}, caveats=[])
     intake = make_intake_answers(candidates_under_consideration=["Widget Pro"])
 
-    candidates = _extraction_candidates(survey, refine_outcome, intake)
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
 
     assert candidates == ["Widget Pro"]  # not duplicated
+    assert caveat is None
+
+
+def test_extraction_candidates_caps_at_row_cap_with_no_caveat_when_under():
+    """Fewer surviving candidates than ROW_CAP — no cap, no caveat, matches
+    the standing-desks live failure's absence in the small case."""
+    survey = make_survey_report(
+        clusters=[
+            make_cluster(key="a", exemplar_products=["A1"]),
+            make_cluster(key="b", exemplar_products=["B1"]),
+        ]
+    )
+    refine_outcome = RefineOutcome(topics=[], surviving_clusters={"a", "b"}, caveats=[])
+    intake = make_intake_answers()
+
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
+
+    assert candidates == ["A1", "B1"]
+    assert caveat is None
+
+
+def test_extraction_candidates_caps_at_row_cap_and_emits_caveat():
+    """The standing-desks failure mode: many clusters, each with several
+    exemplars, should never send more than ROW_CAP names to EXTRACTION —
+    and dropping anything must show up as a caveat, never silently."""
+    clusters = [
+        make_cluster(key=f"cluster-{i}", exemplar_products=[f"P{i}a", f"P{i}b", f"P{i}c"])
+        for i in range(7)  # 7 clusters x 3 exemplars = 21 candidates, well over ROW_CAP=12
+    ]
+    survey = make_survey_report(clusters=clusters)
+    refine_outcome = RefineOutcome(
+        topics=[], surviving_clusters={c.key for c in clusters}, caveats=[]
+    )
+    intake = make_intake_answers()
+
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
+
+    assert len(candidates) == ROW_CAP
+    assert caveat is not None
+    assert "12" in caveat  # names the cap
+    assert "9" in caveat  # 21 total - 12 kept = 9 dropped
+
+
+def test_extraction_candidates_round_robins_across_surviving_clusters():
+    """Every surviving cluster contributes at least one candidate before
+    any cluster contributes a second — a single exemplar-heavy cluster
+    must not exhaust the cap and starve the rest."""
+    clusters = [
+        make_cluster(key="heavy", exemplar_products=[f"Heavy{i}" for i in range(20)]),
+        make_cluster(key="light-a", exemplar_products=["LightA1"]),
+        make_cluster(key="light-b", exemplar_products=["LightB1"]),
+    ]
+    survey = make_survey_report(clusters=clusters)
+    refine_outcome = RefineOutcome(
+        topics=[], surviving_clusters={"heavy", "light-a", "light-b"}, caveats=[]
+    )
+    intake = make_intake_answers()
+
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
+
+    assert "LightA1" in candidates  # not starved by "heavy"
+    assert "LightB1" in candidates
+    assert len(candidates) == ROW_CAP
+    assert caveat is not None
+
+
+def test_extraction_candidates_never_drops_user_named_picks():
+    """User-named candidates are kept unconditionally, even if they alone
+    reach or exceed ROW_CAP — explicit user picks are never dropped."""
+    user_picks = [f"UserPick{i}" for i in range(ROW_CAP + 3)]
+    survey = make_survey_report(clusters=[make_cluster(key="a", exemplar_products=["A1"])])
+    refine_outcome = RefineOutcome(topics=[], surviving_clusters={"a"}, caveats=[])
+    intake = make_intake_answers(candidates_under_consideration=user_picks)
+
+    candidates, caveat = _extraction_candidates(survey, refine_outcome, intake)
+
+    assert set(user_picks) <= set(candidates)
+    assert caveat is not None  # "A1" never got a slot
 
 
 def test_mark_truncated_sets_once_and_never_moves():

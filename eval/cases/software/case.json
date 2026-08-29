@@ -1,0 +1,22 @@
+{
+  "name": "software",
+  "category": "software",
+  "product_type": "password managers",
+  "location": {
+    "country": "US",
+    "currency": "USD"
+  },
+  "units": "imperial",
+  "intake_script": [
+    "no",
+    "no limit",
+    "",
+    "1Password, Bitwarden, Dashlane"
+  ],
+  "expected_shape": {
+    "kind": "software"
+  },
+  "must_appear_products": [],
+  "expected_confidence_order": [],
+  "price_assertions": []
+}
