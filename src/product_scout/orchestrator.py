@@ -439,6 +439,7 @@ async def run_pipeline(
             products = await run_extraction(
                 survey_outcome.product_type, candidates, survey, ledger, location,
                 survey_outcome.low_evidence_mode, budget, extractor,
+                progress=port.report_progress,
             )
             products = filter_by_required_features(products, intake.required_features)
         extraction_checkpoint = {"products": [p.model_dump(mode="json") for p in products]}
@@ -463,6 +464,7 @@ async def run_pipeline(
             timing_outcome = await run_timing(
                 survey_outcome.product_type, [p.name for p in products], ledger,
                 survey_outcome.low_evidence_mode, budget, timing_researcher,
+                progress=port.report_progress,
             )
         run_store.save_checkpoint(run_id, "timing", timing_outcome.model_dump(mode="json"))
         truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "timing")
@@ -486,6 +488,7 @@ async def run_pipeline(
             prior_gen_outcome = await run_prior_gen(
                 products, survey, ledger, location, survey_outcome.low_evidence_mode,
                 budget, prior_gen_researcher,
+                progress=port.report_progress,
             )
         run_store.save_checkpoint(run_id, "prior_gen", prior_gen_outcome.model_dump(mode="json"))
         truncated_at_phase = _mark_truncated(truncated_at_phase, budget, "prior_gen")

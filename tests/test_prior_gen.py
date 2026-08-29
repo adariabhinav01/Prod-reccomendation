@@ -106,7 +106,7 @@ class FakePriorGenResearcher:
         self._raw = raw
         self.calls: list[tuple] = []
 
-    async def research(self, seeds, ledger, low_evidence_mode, budget) -> RawPriorGen:
+    async def research(self, seeds, ledger, low_evidence_mode, budget, progress=None) -> RawPriorGen:
         self.calls.append((seeds, ledger, low_evidence_mode, budget))
         return self._raw
 

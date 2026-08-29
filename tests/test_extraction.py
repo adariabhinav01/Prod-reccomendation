@@ -40,6 +40,7 @@ class FakeExtractor:
         location: Location,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress=None,
     ) -> list[Product]:
         self.calls.append(
             (product_type, candidates, survey, ledger, location, low_evidence_mode, budget)

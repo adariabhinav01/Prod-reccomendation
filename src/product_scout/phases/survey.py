@@ -170,6 +170,7 @@ from typing import Literal, Protocol, runtime_checkable
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    ResultMessage,
     ServerToolResultBlock,
     TextBlock,
     ToolResultBlock,
@@ -185,6 +186,7 @@ from product_scout.hooks.budget import (
     cost_cap_pre_tool_use_matchers,
 )
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.progress import ProgressFn, format_result_progress, progress_hook_matchers
 from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.io.port import QuestionPort
 from product_scout.models import (
@@ -290,7 +292,12 @@ class Surveyor(Protocol):
     """Seam for Phase 1's actual research + clustering call."""
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
+        self,
+        product_type: str,
+        location: Location,
+        ledger: FetchLedger,
+        budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> RawSurvey: ...
 
 
@@ -560,7 +567,9 @@ async def run_survey(
     caveats: list[str] = []
 
     while True:
-        raw = await surveyor.survey(current_type, location, ledger, budget)
+        raw = await surveyor.survey(
+            current_type, location, ledger, budget, progress=port.report_progress
+        )
         caveats.extend(raw.caveats)  # e.g. _repair_comparison_specs (step 12)
         report, verify_caveats = _apply_exemplar_constraint(
             raw.report, raw.evidence_pool
@@ -715,7 +724,12 @@ class SdkSurveyor:
         self._model = model
 
     async def survey(
-        self, product_type: str, location: Location, ledger: FetchLedger, budget: RunBudget
+        self,
+        product_type: str,
+        location: Location,
+        ledger: FetchLedger,
+        budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> RawSurvey:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
@@ -739,7 +753,8 @@ class SdkSurveyor:
                 "PreToolUse": source_guard_hook_matchers(False)
                 + cost_cap_pre_tool_use_matchers(budget),
                 "PostToolUse": ledger_hook_matchers(ledger)
-                + cost_cap_post_tool_use_matchers(budget),
+                + cost_cap_post_tool_use_matchers(budget)
+                + progress_hook_matchers(progress),
             },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
@@ -747,6 +762,10 @@ class SdkSurveyor:
         final_text = ""
         evidence_pool: list[str] = []
         async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                if progress:
+                    await progress(format_result_progress(message))
+                continue
             if not isinstance(message, (AssistantMessage, UserMessage)):
                 continue
             content = message.content

@@ -122,7 +122,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol, runtime_checkable
 
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
 from pydantic import BaseModel
 
 from product_scout import config
@@ -132,6 +132,7 @@ from product_scout.hooks.budget import (
     cost_cap_pre_tool_use_matchers,
 )
 from product_scout.hooks.ledger import FetchLedger, ledger_hook_matchers
+from product_scout.hooks.progress import ProgressFn, format_result_progress, progress_hook_matchers
 from product_scout.hooks.source_guard import source_guard_hook_matchers
 from product_scout.models import Location, Product, SurveyReport
 from product_scout.skills import assert_skill_loaded
@@ -207,6 +208,7 @@ class PriorGenResearcher(Protocol):
         ledger: FetchLedger,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> RawPriorGen: ...
 
 
@@ -280,6 +282,7 @@ async def run_prior_gen(
     low_evidence_mode: bool,
     budget: RunBudget,
     researcher: PriorGenResearcher,
+    progress: ProgressFn | None = None,
 ) -> PriorGenOutcome:
     """Run Phase 5 end to end: research every current-gen seed in one
     Haiku call, then admit or silently drop each finding per §12.1/§12.6.
@@ -305,7 +308,9 @@ async def run_prior_gen(
     if not current_gen_seeds:
         return PriorGenOutcome(products=[], caveats=[])
 
-    raw = await researcher.research(current_gen_seeds, ledger, low_evidence_mode, budget)
+    raw = await researcher.research(
+        current_gen_seeds, ledger, low_evidence_mode, budget, progress=progress
+    )
     seeds_by_name = {p.name: p for p in current_gen_seeds}
 
     products: list[Product] = []
@@ -428,6 +433,7 @@ class SdkPriorGenResearcher:
         ledger: FetchLedger,
         low_evidence_mode: bool,
         budget: RunBudget,
+        progress: ProgressFn | None = None,
     ) -> RawPriorGen:
         # §3: fail loudly before spending anything if the research
         # protocol skill isn't there to be loaded.
@@ -448,13 +454,18 @@ class SdkPriorGenResearcher:
                 "PreToolUse": source_guard_hook_matchers(low_evidence_mode)
                 + cost_cap_pre_tool_use_matchers(budget),
                 "PostToolUse": ledger_hook_matchers(ledger)  # §4.3
-                + cost_cap_post_tool_use_matchers(budget),
+                + cost_cap_post_tool_use_matchers(budget)
+                + progress_hook_matchers(progress),
             },
             skills=[config.RESEARCH_PROTOCOL_SKILL],
         )
 
         final_text = ""
         async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                if progress:
+                    await progress(format_result_progress(message))
+                continue
             if not isinstance(message, AssistantMessage):
                 continue
             content = message.content
