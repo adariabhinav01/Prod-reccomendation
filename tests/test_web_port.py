@@ -405,3 +405,23 @@ def test_report_progress_appends_to_the_in_memory_log():
     run(port.report_progress("SURVEY"))
     run(port.report_progress("  fetched https://example.com"))
     assert port.progress_log == ["SURVEY", "  fetched https://example.com"]
+
+
+# -- on_progress callback (used by web/registry.py's SSE fan-out, W4) ------------
+
+
+def test_on_progress_fires_with_classified_events():
+    events: list[dict] = []
+    port = WebQuestionPort(on_progress=events.append)
+    run(port.report_progress("SURVEY"))
+    run(port.report_progress("  fetched https://example.com"))
+    assert events == [
+        {"type": "phase_entered", "phase": "SURVEY"},
+        {"type": "tick", "text": "fetched https://example.com"},
+    ]
+
+
+def test_on_progress_is_optional_and_progress_log_still_fills():
+    port = WebQuestionPort()  # no on_progress
+    run(port.report_progress("SURVEY"))
+    assert port.progress_log == ["SURVEY"]

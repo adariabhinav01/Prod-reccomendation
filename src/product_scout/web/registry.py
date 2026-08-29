@@ -38,7 +38,13 @@ class RunSession:
     """Everything the web layer knows about one run that a bare
     `store/checkpoint.py` phase-name lookup can't tell it: whether it's
     currently running vs. parked on a question, which phase it's in, and
-    the `WebQuestionPort` a web endpoint answers questions through."""
+    the `WebQuestionPort` a web endpoint answers questions through.
+
+    `subscribers` backs the SSE fan-out (web build order W4): each open
+    `GET /runs/{id}/events` connection owns one `asyncio.Queue` here, and
+    `publish` pushes onto every queue in this list. This lives on the
+    session (per-run), not the registry (cross-run), since fan-out is
+    always scoped to one run's own subscribers."""
 
     run_id: str
     product_type: str
@@ -49,6 +55,37 @@ class RunSession:
     current_phase: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: str | None = None
+    subscribers: list[asyncio.Queue] = field(default_factory=list)
+
+    def subscribe(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue()
+        self.subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        # A queue may already be gone (double-unsubscribe on a racing
+        # disconnect) — tolerate that rather than raising.
+        try:
+            self.subscribers.remove(queue)
+        except ValueError:
+            pass
+
+    def publish(self, event: str, payload: object) -> None:
+        """Fans `(event, payload)` out to every current subscriber.
+        `put_nowait` (never `await put`) — queues are unbounded, and this
+        must never block the pipeline task on a slow or dead browser tab.
+        Iterates a copy so a queue removed mid-fanout (by a concurrently
+        unsubscribing reader) can't raise here."""
+        for queue in list(self.subscribers):
+            queue.put_nowait((event, payload))
+
+    def set_phase(self, phase: str) -> None:
+        """The one place `current_phase` is ever set — called from
+        `web/runs.py`'s `on_progress` callback when a `phase_entered`
+        event is classified. Also publishes the event, so callers don't
+        need to remember to do both."""
+        self.current_phase = phase
+        self.publish("phase_entered", phase)
 
 
 class RunRegistry:

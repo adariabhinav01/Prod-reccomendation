@@ -59,9 +59,9 @@ for what's left, in priority order, before starting new work.
 `docs/web_handoff.md` is a separate, independently-numbered build order
 (W1–W7) for an additive local FastAPI+htmx front end. It does not touch the
 pipeline above and is not gated by Step 15 (which gates skill edits, not
-this). W1–W3 (app skeleton, `WebQuestionPort`, run lifecycle/registry) are
-done; W4–W7 (SSE, the four views, history, park/restart/truncation edge
-cases) are not started. See that doc's own §7 table for status.
+this). All seven steps (W1–W7: app skeleton, `WebQuestionPort`, run
+lifecycle/registry, SSE, the four views, history, park/restart/truncation
+edge cases) are done. See that doc's own §7 table for status.
 
 ## Invariants
 

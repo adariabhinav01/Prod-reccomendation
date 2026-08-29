@@ -1,5 +1,5 @@
 """FastAPI app factory (spec `docs/web_handoff.md` §4/§5/§6, web build
-order W1).
+orders W1/W7).
 
 Local, single-user, no auth (§0) — `create_app()` binds nothing itself;
 binding to `127.0.0.1` only, never `0.0.0.0`, is `cli.py`'s `scout serve`
@@ -12,6 +12,12 @@ itself failing on the first real `query()` call. §5 is explicit that the
 web server must fail fast with a clear message instead, matching
 `config.py`'s own docstring ("`ANTHROPIC_API_KEY` handling belongs at a
 future `cli.py` entrypoint") — this is that entrypoint's web counterpart.
+
+The startup lifespan also runs the W7 orphan scan (`web/reconcile.py`)
+exactly once, storing the result on `app.state.orphaned_runs` — a restart
+is the only time that set can legitimately change (every run this process
+itself starts is already tracked live and cleaned up on
+`finish()`/`abandon()`), so there's no reason to re-scan per request.
 """
 
 from __future__ import annotations
@@ -26,6 +32,8 @@ from product_scout.models import RunRecord
 from product_scout.orchestrator import run_pipeline as _default_pipeline_runner
 from product_scout.store.runs import RunStore
 from product_scout.web import runs as runs_module
+from product_scout.web import views as views_module
+from product_scout.web.reconcile import scan_orphaned_runs
 from product_scout.web.registry import RunRegistry
 
 PipelineRunner = Callable[..., Awaitable[RunRecord | None]]
@@ -66,20 +74,25 @@ def create_app(
     `check_api_key=False` lets tests that never start a real run skip the
     startup check entirely, rather than every test needing a real key set."""
 
+    resolved_run_store = run_store or RunStore()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if check_api_key:
             assert_api_key_present()
+        app.state.orphaned_runs = scan_orphaned_runs(resolved_run_store)
         yield
 
     app = FastAPI(title="Product Scout", lifespan=lifespan)
-    app.state.run_store = run_store or RunStore()
+    app.state.run_store = resolved_run_store
     app.state.pipeline_runner = pipeline_runner or _default_pipeline_runner
     app.state.registry = RunRegistry()
+    app.state.orphaned_runs = {}  # populated by the lifespan above once startup runs
 
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok"}
 
     app.include_router(runs_module.router)
+    app.include_router(views_module.router)
     return app
