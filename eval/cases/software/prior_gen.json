@@ -1,0 +1,100 @@
+{
+  "findings": [
+    {
+      "seed_product_name": "1Password",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Bitwarden",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Dashlane",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "RoboForm",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "LastPass",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "KeePassXC",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Total Password",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Keeper Password Manager",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Vaultwarden",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "NordPass",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Passbolt",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    },
+    {
+      "seed_product_name": "Proton Pass",
+      "predecessor_found": false,
+      "worth_promoting": false,
+      "price_delta_note": null,
+      "capability_delta_note": null,
+      "product": null
+    }
+  ]
+}

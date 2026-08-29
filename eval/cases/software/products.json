@@ -1,0 +1,1308 @@
+[
+  {
+    "name": "1Password",
+    "brand": "AgileBits Inc.",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-consumer-subscription",
+    "cluster_rationale": "Premium consumer password manager with strong cross-platform support and excellent user experience",
+    "strength_archetype": "Premium ease of use with enterprise-grade security",
+    "pricing": {
+      "model_type": "subscription_only",
+      "upfront_amount": null,
+      "recurring_amount": 2.99,
+      "recurring_period": "monthly",
+      "recurring_required_for_core": true,
+      "total_cost_1yr": 35.88,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://1password.com/sign-up/",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Platform Support": {
+        "value": "macOS, iOS, Windows, Android, Linux, browser extensions",
+        "native_unit": null,
+        "source_url": "https://1password.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption": {
+        "value": "Zero-knowledge encryption",
+        "native_unit": null,
+        "source_url": "https://1password.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Two-Factor Authentication": {
+        "value": "Integrated code generation with 2FA support",
+        "native_unit": null,
+        "source_url": "https://1password.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "High security and seamless password management",
+      "Comprehensive features across all devices",
+      "Excellent customer support with fast response times",
+      "Intuitive and user-friendly interface"
+    ],
+    "cons": [
+      "Reports of app stability issues and weekly crashes",
+      "Browser extension requires periodic reinstallation",
+      "Subscription price increases reported by customers"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/1password.com",
+      "https://1password.com/features/"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 1,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "Bitwarden",
+    "brand": "Bitwarden Inc.",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-open-source-freemium",
+    "cluster_rationale": "Open source freemium password manager with strong security and exceptional value proposition",
+    "strength_archetype": "Value-focused with transparency and open source ethos",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": 1.65,
+      "recurring_period": "monthly",
+      "recurring_required_for_core": false,
+      "total_cost_1yr": 19.8,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://bitwarden.com/pricing/",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Platform Support": {
+        "value": "Browser extensions, mobile apps, desktop applications across all major platforms",
+        "native_unit": null,
+        "source_url": "https://bitwarden.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption Model": {
+        "value": "Zero-knowledge encryption with open source security model",
+        "native_unit": null,
+        "source_url": "https://bitwarden.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Free Tier Features": {
+        "value": "Unlimited passwords, 2-step login",
+        "native_unit": null,
+        "source_url": "https://bitwarden.com/pricing/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Two-Factor Authentication": {
+        "value": "Integrated authenticator for two-factor auth",
+        "native_unit": null,
+        "source_url": "https://bitwarden.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Excellent affordability at ~$2/month with annual billing",
+      "Strong security and encryption with open source transparency",
+      "Simple and intuitive interface",
+      "Unlimited devices across all plans"
+    ],
+    "cons": [
+      "Autofill functionality issues and browser loops reported",
+      "Browser extension causing system lag in some cases",
+      "Password saving failures on certain websites",
+      "Mobile version compatibility problems"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/bitwarden.com",
+      "https://bitwarden.com/pricing/"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 3,
+      "independent_review_count": 2,
+      "extracted_spec_count": 1,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "Dashlane",
+    "brand": "Dashlane Inc.",
+    "generation": "current",
+    "role": "baseline_current",
+    "cluster_key": "password-manager-premium-subscription",
+    "cluster_rationale": "Premium password manager with AI-powered security features and comprehensive protection tools",
+    "strength_archetype": "AI-enhanced security with advanced threat detection",
+    "pricing": {
+      "model_type": "subscription_only",
+      "upfront_amount": null,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": true,
+      "total_cost_1yr": null,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.dashlane.com/pricing",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Platform Support": {
+        "value": "All browsers, iOS, Android, Windows, macOS",
+        "native_unit": null,
+        "source_url": "https://www.dashlane.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption": {
+        "value": "Zero-knowledge architecture",
+        "native_unit": null,
+        "source_url": "https://www.dashlane.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "AI-Powered Features": {
+        "value": "AI-powered scam protection with real-time site analysis and phishing detection",
+        "native_unit": null,
+        "source_url": "https://www.dashlane.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Security Monitoring": {
+        "value": "Dark web monitoring and password health monitoring",
+        "native_unit": null,
+        "source_url": "https://www.dashlane.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "AI-powered scam protection and phishing detection",
+      "Secure password storage and organization",
+      "Multi-device synchronization",
+      "Dark web monitoring included"
+    ],
+    "cons": [
+      "Significant price increases (35% reported by customers)",
+      "Automatic renewal charges despite cancellation attempts",
+      "Difficult account cancellation process",
+      "AI chatbot-only support with no human support",
+      "Autofill failures particularly on Mac"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/dashlane.com",
+      "https://www.dashlane.com/features"
+    ],
+    "in_budget": false,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "RoboForm",
+    "brand": "Siber Systems",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-freemium-reliable",
+    "cluster_rationale": "Reliable freemium password manager with strong customer satisfaction and competitive pricing",
+    "strength_archetype": "Reliability and long-term stability",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": 2.49,
+      "recurring_period": "monthly",
+      "recurring_required_for_core": false,
+      "total_cost_1yr": 29.88,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.roboform.com",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Platform Support": {
+        "value": "Windows, macOS, iOS, Android, browser extensions (Chrome, Firefox, Safari, Edge)",
+        "native_unit": null,
+        "source_url": "https://www.roboform.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption": {
+        "value": "AES-256 encryption with PBKDF2 SHA256 key derivation, zero-knowledge architecture",
+        "native_unit": null,
+        "source_url": "https://www.roboform.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Two-Factor Authentication": {
+        "value": "Advanced 2FA with email, SMS, authenticator apps, passkeys, and hardware keys",
+        "native_unit": null,
+        "source_url": "https://www.roboform.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Data Breach Monitoring": {
+        "value": "Data breach monitoring for email addresses",
+        "native_unit": null,
+        "source_url": "https://www.roboform.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Reliable and stable over extended use (10+ years noted by users)",
+      "Quick and responsive customer service",
+      "Strong password management and form-filling capabilities",
+      "Advanced two-factor authentication options"
+    ],
+    "cons": [
+      "Synchronization issues between devices reported",
+      "Autofill limitations on some websites",
+      "Master password recovery challenges",
+      "Occasional multi-factor authentication glitches"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/roboform.com",
+      "https://www.roboform.com"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 1,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "LastPass",
+    "brand": "GoTo (formerly LogMeIn)",
+    "generation": "current",
+    "role": "reference_displaced",
+    "cluster_key": "password-manager-freemium-troubled",
+    "cluster_rationale": "Historically popular password manager with significant recent trust and reliability issues",
+    "strength_archetype": "Legacy product with declining user satisfaction",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": false,
+      "total_cost_1yr": null,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.lastpass.com/pricing",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Platform Support": {
+        "value": "Chrome, Firefox, Safari, Android, iOS, browser extensions",
+        "native_unit": null,
+        "source_url": "https://www.lastpass.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Storage Capacity": {
+        "value": "Unlimited password storage on all plans",
+        "native_unit": null,
+        "source_url": "https://www.lastpass.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Security Features": {
+        "value": "Dark web monitoring, security dashboard with alerts, passkey management",
+        "native_unit": null,
+        "source_url": "https://www.lastpass.com/features",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Vault security and encryption features available",
+      "Cross-device autofill convenience for basic functionality",
+      "Unlimited password storage"
+    ],
+    "cons": [
+      "Widespread account lockout issues with no recovery path",
+      "Customer service failures and unresponsive support",
+      "Master password authentication failures preventing vault access",
+      "Subscription and billing issues with unwanted continued charges",
+      "Persistent application bugs and autofill failures across platforms",
+      "Interface freezing and performance issues",
+      "Company not responsive to customer feedback"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/lastpass.com",
+      "https://www.lastpass.com/features"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "KeePassXC",
+    "brand": "KeePassXC Project",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-open-source-offline",
+    "cluster_rationale": "Free open source password manager designed for offline-first local storage with strong encryption",
+    "strength_archetype": "Privacy-first with complete offline control",
+    "pricing": {
+      "model_type": "one_time",
+      "upfront_amount": 0.0,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": false,
+      "total_cost_1yr": 0.0,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://keepassxc.org/",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "License": {
+        "value": "GNU General Public License v3",
+        "native_unit": null,
+        "source_url": "https://keepassxc.org/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Platform Support": {
+        "value": "Windows, macOS, Linux",
+        "native_unit": null,
+        "source_url": "https://keepassxc.org/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption Standard": {
+        "value": "AES-256 encryption with ANSSI security certification",
+        "native_unit": null,
+        "source_url": "https://keepassxc.org/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Storage Model": {
+        "value": "Offline-first local file storage with no cloud servers",
+        "native_unit": null,
+        "source_url": "https://keepassxc.org/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Completely free and open source with no subscriptions",
+      "No ads, tracking, or data collection",
+      "Strong AES-256 encryption with security certification",
+      "Offline-first approach gives complete data control",
+      "Full source code transparency with community development",
+      "Available in Linux distributions as native packages"
+    ],
+    "cons": [
+      "Offline-only approach with no cloud synchronization",
+      "Requires manual setup and configuration",
+      "No professional customer support",
+      "User must manage updates and backups",
+      "Smaller community compared to commercial options"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://keepassxc.org/"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 1,
+      "independent_review_count": 1,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.324,
+      "confidence_note": "1 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 very_low confidence."
+    }
+  },
+  {
+    "name": "Total Password",
+    "brand": "Total Security US LLC",
+    "generation": "current",
+    "role": "baseline_current",
+    "cluster_key": "password-manager-affordable-subscription",
+    "cluster_rationale": "Affordable subscription-based password manager with strong encryption and US company backing",
+    "strength_archetype": "Value-focused affordable option",
+    "pricing": {
+      "model_type": "subscription_only",
+      "upfront_amount": 99.0,
+      "recurring_amount": null,
+      "recurring_period": "annual",
+      "recurring_required_for_core": true,
+      "total_cost_1yr": 99.0,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.totalpassword.com/pricing",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": true,
+      "ships_from": "US",
+      "ships_from_signal": "fallback",
+      "ships_from_confidence": 0.25,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Encryption": {
+        "value": "AES-256 encryption with zero-knowledge architecture",
+        "native_unit": null,
+        "source_url": "https://www.totalpassword.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Platform Support": {
+        "value": "Chrome, Edge, Safari, iOS 12+, Android 5.0+, Windows, macOS",
+        "native_unit": null,
+        "source_url": "https://www.totalpassword.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Features": {
+        "value": "Auto-fill, password generator, cross-device sync, biometric unlock, secure storage for credit cards and notes",
+        "native_unit": null,
+        "source_url": "https://www.totalpassword.com",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Money-Back Guarantee": {
+        "value": "30-day guarantee for annual/biannual plans, 14-day for monthly/quarterly plans",
+        "native_unit": null,
+        "source_url": "https://www.totalpassword.com/pricing",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Affordable annual pricing at $99 per year",
+      "AES-256 encryption with zero-knowledge architecture",
+      "Cross-device synchronization capabilities",
+      "Biometric unlock available on mobile",
+      "Money-back guarantee on annual plans",
+      "US-based company"
+    ],
+    "cons": [
+      "Limited independent review and reputation data",
+      "Small brand awareness in market",
+      "Limited information on customer support quality",
+      "Platform compatibility varies by operating system"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.totalpassword.com",
+      "https://www.totalpassword.com/pricing"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "Keeper Password Manager",
+    "brand": "Keeper Security Inc.",
+    "generation": "current",
+    "role": "baseline_current",
+    "cluster_key": "password-manager-enterprise-subscription",
+    "cluster_rationale": "Enterprise-focused password manager with strong compliance certifications but mixed user satisfaction",
+    "strength_archetype": "Enterprise security with compliance certifications",
+    "pricing": {
+      "model_type": "subscription_only",
+      "upfront_amount": null,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": true,
+      "total_cost_1yr": null,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.keepersecurity.com/pricing.html",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Encryption": {
+        "value": "Zero trust, zero knowledge end-to-end encryption",
+        "native_unit": null,
+        "source_url": "https://www.keepersecurity.com/products/keeper-password-manager.html",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Compliance Certifications": {
+        "value": "FedRAMP High, GovRAMP High, ISO 27001/27017/27018, SOC 2, HIPAA, GDPR, FDA 21 CFR Part 11, PCI DSS Level 1",
+        "native_unit": null,
+        "source_url": "https://www.keepersecurity.com/products/keeper-password-manager.html",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Customer Base": {
+        "value": "93,000+ business customers in 150+ countries",
+        "native_unit": null,
+        "source_url": "https://www.keepersecurity.com/products/keeper-password-manager.html",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Provisioning": {
+        "value": "SCIM, AD/LDAP, SSO/SAML integration available at Enterprise tier",
+        "native_unit": null,
+        "source_url": "https://www.keepersecurity.com/products/keeper-password-manager.html",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Clean and intuitive user interface",
+      "Browser extension convenience for autofill",
+      "Strong security features and zero-knowledge encryption",
+      "Reliable cross-platform synchronization",
+      "Comprehensive compliance certifications"
+    ],
+    "cons": [
+      "Autofill inconsistency and failures on certain sites",
+      "Unwanted auto-renewals and subscription management issues",
+      "Support responses feel automated and defensive",
+      "Data export barriers with CSV downloads locked behind subscription",
+      "Complex interface for new users"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/keepersecurity.com",
+      "https://www.keepersecurity.com/products/keeper-password-manager.html"
+    ],
+    "in_budget": false,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "Vaultwarden",
+    "brand": "Vaultwarden Project",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-open-source-selfhosted",
+    "cluster_rationale": "Community-maintained lightweight open source password manager for self-hosted deployments",
+    "strength_archetype": "Transparency with technical control and resource efficiency",
+    "pricing": {
+      "model_type": "one_time",
+      "upfront_amount": 0.0,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": false,
+      "total_cost_1yr": 0.0,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://github.com/dani-garcia/vaultwarden",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "License": {
+        "value": "GNU Affero General Public License v3.0",
+        "native_unit": null,
+        "source_url": "https://github.com/dani-garcia/vaultwarden",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Implementation Language": {
+        "value": "Rust for resource-efficient performance",
+        "native_unit": null,
+        "source_url": "https://github.com/dani-garcia/vaultwarden",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Client Compatibility": {
+        "value": "Compatible with official Bitwarden clients and ecosystem",
+        "native_unit": null,
+        "source_url": "https://github.com/dani-garcia/vaultwarden",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Authentication Methods": {
+        "value": "Authenticator apps, email, FIDO2 WebAuthn, YubiKey, Duo",
+        "native_unit": null,
+        "source_url": "https://github.com/dani-garcia/vaultwarden",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Completely free and open source",
+      "Lightweight and resource-efficient implementation",
+      "Compatible with Bitwarden ecosystem and clients",
+      "Self-hosted gives complete control over data",
+      "Full source code transparency",
+      "Community-driven development"
+    ],
+    "cons": [
+      "Requires technical knowledge to self-host and maintain",
+      "Not an official Bitwarden product - community-maintained",
+      "No professional support available",
+      "User responsible for server management and security updates",
+      "No built-in cloud backup or failover",
+      "Smaller user community than commercial alternatives"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://github.com/dani-garcia/vaultwarden"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 1,
+      "independent_review_count": 1,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.324,
+      "confidence_note": "1 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 very_low confidence."
+    }
+  },
+  {
+    "name": "NordPass",
+    "brand": "NordPass (NordVPN subsidiary)",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-freemium-vpn-integrated",
+    "cluster_rationale": "Privacy-focused freemium password manager integrated with VPN provider ecosystem",
+    "strength_archetype": "Privacy-first with VPN ecosystem integration",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": 1.34,
+      "recurring_period": "monthly",
+      "recurring_required_for_core": false,
+      "total_cost_1yr": 16.08,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://nordpass.com",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Encryption": {
+        "value": "XChaCha20 encryption with zero-knowledge architecture",
+        "native_unit": null,
+        "source_url": "https://nordpass.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Platform Support": {
+        "value": "Windows, macOS, iOS, Android, Chrome, Firefox, Safari, Edge, Brave",
+        "native_unit": null,
+        "source_url": "https://nordpass.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Authentication": {
+        "value": "Biometric authentication with Face ID and fingerprint support",
+        "native_unit": null,
+        "source_url": "https://nordpass.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "User Base": {
+        "value": "11 million+ users worldwide and 11,500+ companies",
+        "native_unit": null,
+        "source_url": "https://nordpass.com/features/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Responsive and helpful customer support",
+      "Reliable and easy-to-use interface",
+      "11 million+ users with established user base",
+      "Email masking for privacy included in plans",
+      "Biometric authentication available",
+      "Strong encryption with zero-knowledge architecture"
+    ],
+    "cons": [
+      "App bugs and login loops reported by users",
+      "Browser extension freezing and UI issues",
+      "Autofill failures on dynamic websites",
+      "Device compatibility issues particularly on iOS and legacy devices",
+      "Multiple authentication steps required for each login",
+      "Unexpected charges after account cancellation reported"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.trustpilot.com/review/nordpass.com",
+      "https://nordpass.com/features/"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 2,
+      "independent_review_count": 2,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.427,
+      "confidence_note": "2 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 low confidence."
+    }
+  },
+  {
+    "name": "Passbolt",
+    "brand": "Passbolt S.A.",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-open-source-enterprise",
+    "cluster_rationale": "Enterprise-grade open source password manager with advanced compliance certifications and fine-grained permissions",
+    "strength_archetype": "Transparency with enterprise-grade security and compliance",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": 4.9,
+      "recurring_period": "monthly",
+      "recurring_required_for_core": false,
+      "total_cost_1yr": null,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://www.passbolt.com/pricing",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "License": {
+        "value": "100% open source with AGPL V3 license across all editions",
+        "native_unit": null,
+        "source_url": "https://www.passbolt.com/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Encryption Model": {
+        "value": "End-to-end encryption with public-private key architecture",
+        "native_unit": null,
+        "source_url": "https://www.passbolt.com/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Compliance": {
+        "value": "SOC 2 Type II certified, GDPR compliant, ANSSI CSPN certification in progress, FIDO Alliance member",
+        "native_unit": null,
+        "source_url": "https://www.passbolt.com/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Deployment Options": {
+        "value": "Cloud hosting in Europe, self-hosted on-premises, Docker, Kubernetes Helm, package installation, air-gap compatible",
+        "native_unit": null,
+        "source_url": "https://www.passbolt.com/",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Completely open source with full transparency and no proprietary lock-in",
+      "Enterprise-grade SOC 2 and GDPR compliance certifications",
+      "Granular fine-grained credential sharing and permissions",
+      "Scales from small teams to large organizations",
+      "Flexible deployment options including self-hosted and cloud",
+      "50,000+ organizations using service worldwide"
+    ],
+    "cons": [
+      "Requires more technical setup than proprietary solutions",
+      "Minimum 10-user requirement for Pro edition",
+      "Community-driven support rather than professional support",
+      "Limited market awareness compared to commercial competitors",
+      "Smaller user community for peer support and resources"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://www.passbolt.com/"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 1,
+      "independent_review_count": 1,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.324,
+      "confidence_note": "1 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 very_low confidence."
+    }
+  },
+  {
+    "name": "Proton Pass",
+    "brand": "Proton AG",
+    "generation": "current",
+    "role": "recommendation",
+    "cluster_key": "password-manager-freemium-privacy",
+    "cluster_rationale": "Privacy-focused freemium password manager integrated with Proton ecosystem and email provider",
+    "strength_archetype": "Privacy-first with generous free tier",
+    "pricing": {
+      "model_type": "freemium",
+      "upfront_amount": null,
+      "recurring_amount": null,
+      "recurring_period": null,
+      "recurring_required_for_core": false,
+      "total_cost_1yr": null,
+      "price_currency": "USD",
+      "price_tax_inclusive": null,
+      "price_source_url": "https://proton.me/pass/pricing",
+      "price_observed_at": "2026-08-29T00:15:29Z",
+      "price_overridden": false
+    },
+    "availability": {
+      "sold_in_region": true,
+      "regional_names": [],
+      "ships_to_region": null,
+      "ships_from": null,
+      "ships_from_signal": null,
+      "ships_from_confidence": 0.0,
+      "import_caveats": [],
+      "shipping_estimate_native": null,
+      "duty_estimate_native": null,
+      "landed_price_native": null
+    },
+    "specs": {
+      "Free Tier Features": {
+        "value": "Unlimited logins, notes, credit cards, password generator, passkeys support, 10 hide-my-email aliases, browser extensions, mobile apps",
+        "native_unit": null,
+        "source_url": "https://proton.me/pass/pricing",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Platform Support": {
+        "value": "Android, iOS, Windows, macOS, Linux, browser extensions (Chrome, Safari, Edge, Firefox, Brave)",
+        "native_unit": null,
+        "source_url": "https://proton.me/pass/pricing",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      },
+      "Money-Back Guarantee": {
+        "value": "30-day money-back guarantee on paid plans",
+        "native_unit": null,
+        "source_url": "https://proton.me/pass/pricing",
+        "source_type": "manufacturer",
+        "has_stated_methodology": false,
+        "corroborated_by": [],
+        "conflicting_values": [],
+        "observed_at": "2026-08-29T00:15:29Z",
+        "from_trusted_source": false
+      }
+    },
+    "pros": [
+      "Freemium model with truly unlimited free tier for basic password management",
+      "Privacy-focused company with strong privacy commitment",
+      "Cross-platform availability on all major devices",
+      "Integration with Proton Mail and ecosystem",
+      "30-day money-back guarantee on paid plans",
+      "Email masking for privacy included"
+    ],
+    "cons": [
+      "Pricing for premium tiers not clearly displayed in USD",
+      "Relatively newer product launched in June 2023 with limited independent reviews",
+      "Limited customer feedback and reputation data available",
+      "Fewer features and less mature than established competitors",
+      "Parent company (Proton Mail) has received mixed user reviews"
+    ],
+    "ownership_notes": [],
+    "review_sources": [
+      "https://proton.me/pass/pricing"
+    ],
+    "in_budget": true,
+    "evidence": {
+      "source_count": 1,
+      "independent_review_count": 1,
+      "extracted_spec_count": 0,
+      "has_tier1_specs": true,
+      "has_methodology_backed_source": false,
+      "corroboration_ratio": 0.0,
+      "conflict_ratio": 0.0,
+      "recency_factor": 1.0,
+      "confidence": 0.324,
+      "confidence_note": "1 independent review(s), Tier 1 specs, no methodology-backed source, 0% corroborated, 0% conflicted \u2192 very_low confidence."
+    }
+  }
+]
