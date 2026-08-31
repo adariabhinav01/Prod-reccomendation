@@ -313,6 +313,7 @@ async def run_pipeline(
     *,
     settings_path: Path | str | None = None,
     resume_run_id: str | None = None,
+    run_id: str | None = None,
     surveyor: Surveyor | None = None,
     refiner: Refiner | None = None,
     extractor: Extractor | None = None,
@@ -341,6 +342,16 @@ async def run_pipeline(
     if INTAKE itself never checkpointed, which `run_id`'s own up-front
     validation below refuses rather than silently re-asking INTAKE with
     whatever (possibly empty) string the caller passed.
+
+    `run_id` (web port, build order W3) lets a fresh (non-resumed) run be
+    registered under an id the caller already knows, generated with the
+    same `generate_run_id()` this module would otherwise call internally —
+    needed because a caller that has to redirect an HTTP client to
+    `/runs/{id}` can't wait for this coroutine to pick one on its own.
+    `None` (the default) reproduces today's behavior exactly: a fresh
+    `generate_run_id()` call, same as before this parameter existed. Has
+    no effect when resuming — `resume_run_id` alone decides the id in that
+    case, exactly as before.
     """
     for skill in _REQUIRED_SKILLS:
         assert_skill_loaded(skill)
@@ -366,7 +377,7 @@ async def run_pipeline(
             # Already fully completed and saved — resuming it is a no-op.
             return run_store.load(run_id)
     else:
-        run_id = generate_run_id()
+        run_id = run_id or generate_run_id()
 
     ledger = FetchLedger()
     budget = RunBudget(max_fetches=config.MAX_RUN_FETCHES, max_searches=config.MAX_RUN_SEARCHES)

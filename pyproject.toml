@@ -12,6 +12,9 @@ dependencies = [
     "claude-agent-sdk",
     "python-dotenv",
     "pydantic>=2.13",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
 ]
 
 [project.scripts]
@@ -20,6 +23,7 @@ scout = "product_scout.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "httpx",
 ]
 
 [tool.setuptools.packages.find]

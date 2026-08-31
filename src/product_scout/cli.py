@@ -1,7 +1,10 @@
 """CLI entrypoint (spec docs/handoff.md §16; build order step 3 adds the
 `config` subcommand, step 14 adds `rescore`/`history`, step 15 adds `eval`
 and — filling a gap the numbered build order never explicitly named —
-`research` itself, the command that actually produces a recommendation).
+`research` itself, the command that actually produces a recommendation;
+web build order W1 adds `serve`, the additive HTTP front end from
+`docs/web_handoff.md` — a separate, independently-numbered build order
+that never touches the pipeline this file otherwise drives).
 
     scout research "standing desks" [--location XX]
     scout research --resume <run_id>
@@ -9,6 +12,7 @@ and — filling a gap the numbered build order never explicitly named —
     scout rescore <run_id> --set "Product Name=199"
     scout history [--category <type>]
     scout eval [--stable-only]
+    scout serve [--port 8000]
 
 Wired as the `scout` console script via pyproject.toml's [project.scripts].
 
@@ -109,6 +113,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Replay frozen fixtures offline (no web); only the blocking stable checks run.",
     )
 
+    serve_parser = subparsers.add_parser(
+        "serve", help="Run the local web port (docs/web_handoff.md)"
+    )
+    serve_parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address. Must be 127.0.0.1 (default) — never exposed publicly (§6).",
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=8000, help="Port to listen on (default: 8000).",
+    )
+
     return parser
 
 
@@ -156,10 +171,13 @@ def main(
         scratch_dir = eval_scratch_dir or _DEFAULT_EVAL_SCRATCH_DIR
         return _handle_eval(args, cases_dir, store, scratch_dir, refiner, scorer, synthesizer)
 
+    if args.command == "serve":
+        return _handle_serve(args)
+
     # Unreachable: required=True on both `config` subparser levels means
     # argparse itself exits (SystemExit(2)) before main() ever sees an
-    # incomplete command line; `research`/`rescore`/`history`/`eval` are
-    # handled above.
+    # incomplete command line; `research`/`rescore`/`history`/`eval`/`serve`
+    # are handled above.
     return 1
 
 
@@ -292,6 +310,35 @@ def _handle_history(args: argparse.Namespace, run_store: RunStore) -> int:
             f"{entry.run_id}  {entry.created_at:%Y-%m-%d %H:%M}  "
             f"{entry.category}  {entry.verdict}  top pick: {entry.top_pick or '—'}"
         )
+    return 0
+
+
+def _handle_serve(args: argparse.Namespace) -> int:
+    # §6: "Bind 127.0.0.1 only. Never 0.0.0.0." A `--host` that looked
+    # respected but silently got coerced would be worse than one that
+    # doesn't exist — refuse outright rather than overriding it.
+    if args.host != "127.0.0.1":
+        print(
+            f"scout serve: --host must be 127.0.0.1 (got {args.host!r}) — "
+            "this is a local, single-user tool with no auth; it must never "
+            "bind publicly.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Imported lazily so every other `scout` subcommand stays free of
+    # FastAPI/uvicorn's import cost — only `serve` ever needs the web port.
+    from product_scout.web.app import MissingApiKeyError, assert_api_key_present, create_app
+
+    try:
+        assert_api_key_present()
+    except MissingApiKeyError as exc:
+        print(f"scout serve: {exc}", file=sys.stderr)
+        return 1
+
+    import uvicorn
+
+    uvicorn.run(create_app(), host=args.host, port=args.port)
     return 0
 
 
