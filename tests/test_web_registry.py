@@ -151,3 +151,42 @@ def test_abandon_raises_for_an_unknown_run_id():
     registry = RunRegistry()
     with pytest.raises(KeyError):
         registry.abandon("nope")
+
+
+# -- subscribe/publish/set_phase (web build order W4's SSE fan-out) -------------
+
+
+def test_publish_reaches_every_subscriber():
+    session = make_session()
+    q1, q2 = session.subscribe(), session.subscribe()
+    session.publish("tick", {"text": "fetched https://example.com"})
+    assert q1.get_nowait() == ("tick", {"text": "fetched https://example.com"})
+    assert q2.get_nowait() == ("tick", {"text": "fetched https://example.com"})
+
+
+def test_unsubscribe_stops_further_delivery():
+    session = make_session()
+    queue = session.subscribe()
+    session.unsubscribe(queue)
+    session.publish("tick", {"text": "x"})
+    assert queue.empty()
+
+
+def test_unsubscribe_is_idempotent():
+    session = make_session()
+    queue = session.subscribe()
+    session.unsubscribe(queue)
+    session.unsubscribe(queue)  # must not raise
+
+
+def test_publish_with_no_subscribers_does_not_raise():
+    session = make_session()
+    session.publish("tick", {"text": "x"})  # no subscribers at all
+
+
+def test_set_phase_updates_current_phase_and_publishes():
+    session = make_session()
+    queue = session.subscribe()
+    session.set_phase("SURVEY")
+    assert session.current_phase == "SURVEY"
+    assert queue.get_nowait() == ("phase_entered", "SURVEY")

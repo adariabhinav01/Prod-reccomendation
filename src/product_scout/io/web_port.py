@@ -249,8 +249,13 @@ class WebQuestionPort:
     published, and to `None` right after it's resolved. This is deliberately
     a plain callback, not a queue/event bus: it's the minimum W3 needs so
     `RunRegistry` can track `RUNNING` vs `AWAITING_INPUT` accurately without
-    building the SSE fan-out that's W4's job. `report_progress` has no
-    equivalent hook yet in this stage — see `progress_log`/`_classify_progress`.
+    building the SSE fan-out that's W4's job.
+
+    `on_progress`, if given, is called synchronously with `_classify_progress`'s
+    already-classified dict every time `report_progress` fires — the W4
+    analog of `on_pending_changed`, letting `web/registry.py` fan a run's
+    progress out over SSE without this class knowing anything about queues,
+    subscribers, or HTTP.
 
     Validation happens in `submit_answer`/`submit_bailout`, BEFORE the
     future resolves — not in the `ask_*` coroutine after it wakes up. This
@@ -264,12 +269,16 @@ class WebQuestionPort:
     """
 
     def __init__(
-        self, *, on_pending_changed: Callable[[PendingQuestion | None], None] | None = None
+        self,
+        *,
+        on_pending_changed: Callable[[PendingQuestion | None], None] | None = None,
+        on_progress: Callable[[dict], None] | None = None,
     ) -> None:
         self._pending: PendingQuestion | None = None
         self._answer_future: asyncio.Future | None = None
         self._on_pending_changed = on_pending_changed
-        self.progress_log: list[str] = []  # in-memory only in this stage; SSE is W4
+        self._on_progress = on_progress
+        self.progress_log: list[str] = []  # raw messages, kept regardless of on_progress
 
     @property
     def pending(self) -> PendingQuestion | None:
@@ -311,6 +320,8 @@ class WebQuestionPort:
 
     async def report_progress(self, message: str) -> None:
         self.progress_log.append(message)
+        if self._on_progress is not None:
+            self._on_progress(_classify_progress(message))
 
     # -- resolving a pending question, called by a web endpoint (W3) -------
 

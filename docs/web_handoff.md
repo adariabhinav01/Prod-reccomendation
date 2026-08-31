@@ -221,10 +221,10 @@ are numbered independently.
 | W1 | FastAPI app skeleton, startup config/key check, `127.0.0.1` binding, health route | done |
 | W2 | `WebPort` implementing `QuestionPort` with the future-based hold and server-side validation. Unit-test the skip-vs-0.5 distinction (§2.1) before anything else | done |
 | W3 | Run lifecycle: start, single-active enforcement, abandon, interrupted detection | done (interrupted detection deferred to W7) |
-| W4 | SSE progress stream wired to the orchestrator's existing event source | not started |
-| W5 | The four views in htmx | not started |
-| W6 | History page over `index.json` | not started |
-| W7 | Edge cases from §5 — park, restart, truncation, 409 | 409/park done in W3; restart/interrupted-detection and truncation-banner passthrough not started |
+| W4 | SSE progress stream wired to the orchestrator's existing event source | done |
+| W5 | The four views in htmx | done |
+| W6 | History page over `index.json` | done |
+| W7 | Edge cases from §5 — park, restart, truncation, 409 | done |
 
 W1–W3 are testable with a fake `QuestionPort` and no model calls, same discipline
 as `handoff.md` §17's first six steps. See `docs/NEXT_STEPS.md` for the session

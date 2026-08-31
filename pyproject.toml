@@ -24,6 +24,7 @@ scout = "product_scout.cli:main"
 dev = [
     "pytest>=8.0",
     "httpx",
+    "pytest-timeout",
 ]
 
 [tool.setuptools.packages.find]
@@ -32,3 +33,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# Web build order W4: SSE tests are the first place in this suite with a
+# genuine hang risk (an async generator that never reaches a terminal
+# event). "thread" (not the "signal" default) is required — a hang inside
+# TestClient's background-thread portal doesn't yield to a SIGALRM handler
+# on the main thread, so "signal" mode never fires and the run just hangs
+# past this timeout instead of failing loudly. 60s is generous headroom
+# above the whole suite's real runtime (~1s) — this is a safety net, not a
+# per-test budget.
+addopts = "--timeout=60 --timeout-method=thread"
