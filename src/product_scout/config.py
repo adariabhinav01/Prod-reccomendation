@@ -56,6 +56,24 @@ MAX_DISCOVERY_SEARCHES: int = 8
 # the app say "less confident" more often when corroboration is thinner.
 MAX_EXTRACTION_FETCHES_PER_PRODUCT: int = 4
 
+# Added post-v7 (see docs/handoff.md §3's inline note and
+# docs/NEXT_STEPS.md's step-15 log): EXTRACTION originally shipped with no
+# `WebSearch` at all, on the assumption that a candidate's manufacturer
+# page could always be reached by a guessed/constructed URL from its name
+# alone. Live verification against a `rich`/high-differentiation category
+# (many small brands, no single guessable URL pattern) showed this
+# assumption fails in exactly that shape — the model fell back to fetching
+# retailer search-result pages and brand homepages via `WebFetch` instead,
+# never reaching a real per-product page, and recorded zero products
+# despite genuine effort. `WebSearch` is now available to EXTRACTION too,
+# but capped far tighter than SURVEY's own budget: it's a fallback for
+# resolving "what's the real URL for this named candidate," not a second
+# broad research pass. A URL only seen via search is still never
+# admissible as a spec/price source (§4.3, CLAUDE.md invariant 3) — it has
+# to be fetched with `WebFetch` in the same conversation to count; search
+# only helps find WHAT to fetch.
+MAX_EXTRACTION_SEARCHES_PER_PRODUCT: int = 1
+
 # SURVEY (build order step 5) does more per call than Discovery's shortlist
 # search — coverage assessment, clustering, dimension-building, and
 # secondhand-risk research all happen in the same pass (§8.1) — so it gets a
@@ -109,9 +127,12 @@ MAX_PRIOR_GEN_SEARCHES: int = 10
 # MAX_RUN_FETCHES leaves generous headroom above that plus SURVEY/TIMING/
 # PRIOR_GEN's own incidental fetches.
 # MAX_SURVEY_SEARCHES(12) + MAX_TIMING_SEARCHES(8) + MAX_PRIOR_GEN_SEARCHES(10)
-# = 30; MAX_RUN_SEARCHES leaves headroom above that. Enforced by
-# `hooks/budget.py`'s `RunBudget`, wired by `orchestrator.py` (build order
-# step 13) — a tuning candidate for §17.1's golden set, same as
-# COMMODITY_CATALOG_FLOOR.
+# + MAX_EXTRACTION_SEARCHES_PER_PRODUCT(1) x up to 12 candidates (ROW_CAP) = 12
+# = 42; MAX_RUN_SEARCHES leaves headroom above that (was 40/no-EXTRACTION-
+# searches before the post-v7 WebSearch addition above — bumped to keep the
+# same proportional headroom, not because EXTRACTION is expected to use its
+# full per-candidate allowance every time). Enforced by `hooks/budget.py`'s
+# `RunBudget`, wired by `orchestrator.py` (build order step 13) — a tuning
+# candidate for §17.1's golden set, same as COMMODITY_CATALOG_FLOOR.
 MAX_RUN_FETCHES: int = 120
-MAX_RUN_SEARCHES: int = 40
+MAX_RUN_SEARCHES: int = 55
