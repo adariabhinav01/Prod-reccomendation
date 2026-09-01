@@ -15,65 +15,22 @@ other 4 categories (rich, sparse, commodity, cross_border) don't yet.
 (`[PASS] software`). Checkbox 15 stays unchecked until all 5 exist — the
 spec is explicit that it's 5 categories, not "at least one."
 
-A real `ANTHROPIC_API_KEY` is confirmed working and funded as of this
-session (the software capture cost ~$2 in practice, close to the ~$1-2
-estimate). Balance can drain between sessions — check the
+A real `ANTHROPIC_API_KEY` is confirmed working and funded as of the
+2026-08-31 session (the software capture cost ~$2 in practice, close to
+the ~$1-2 estimate; that same session's EXTRACTION bug investigation below
+spent ~$6.49 more). Balance can drain between sessions — check the
 [Anthropic console usage page](https://console.anthropic.com/settings/usage)
 before assuming it's still funded.
 
+**2026-08-31 session:** found and fixed the EXTRACTION-returns-zero-
+products bug that was blocking the `rich` golden-set capture — see
+"Resolved this session" below for the full writeup (root cause, what was
+ruled out, the fix, and live verification). The `rich`/espresso-machines
+capture (priority 1 below) is now unblocked.
+
 ## What's left, in priority order
 
-### 1. Investigate: EXTRACTION returns zero products on rich/high-differentiation categories — do this before capturing the `rich` case
-
-Reproduced live, twice in a row, on "Pickleball Paddles" (`coverage=rich`,
-`differentiation=high`, 35 then 150 `estimated_product_count`): SURVEY
-succeeds, `_extraction_candidates()` hands EXTRACTION a full 12 real
-candidates, and EXTRACTION comes back with **zero** validated products —
-not a cost-cap truncation (`truncated_at_phase` is `null`, `RunBudget`
-never tripped) — so SCORING/SYNTHESIS correctly fall through to
-`INSUFFICIENT_EVIDENCE` on an empty shortlist. This is the same shape the
-"Resolved this session" note above (`ROW_CAP=12`,
-`MAX_EXTRACTION_FETCHES_PER_PRODUCT` 6→4) targeted for the standing-desks
-failure — worth checking whether that fix actually holds for `rich`
-categories in general, or just happened to fix standing desks.
-
-New progress-tick instrumentation landed this session specifically to
-chase this (`hooks/progress.py`'s `PostToolUse` ticks on every
-`WebFetch`/`WebSearch`; `tools/record_product.py` ticks on every
-`record_product` call, success or rejection; every research phase now
-also ticks `format_result_progress` — the terminal `ResultMessage`'s
-`terminal_reason`/`num_turns` — when its `query()` call ends). One live
-rerun with this instrumentation (second Pickleball Paddles attempt) showed
-EXTRACTION making 20 real `WebFetch` calls and **zero** `record_product`
-calls of any kind — not rejections, none at all. Several candidates (e.g.
-11six24 Power Series, Franklin C45 Dynasty, JOOLA Ben Johns Perseus) got
-exactly one clean manufacturer-page fetch and nothing else; meanwhile the
-model burned other fetches on search-result pages (`amazon.com/s?k=...`,
-site `?q=` search endpoints) rather than real product pages, and never
-circled back to call `record_product` for anything, including the easy
-candidates. The `terminal_reason` tick wasn't present yet for that run —
-next rerun will show it.
-
-**Next step:** rerun the same category (or any `rich`/high-differentiation
-category) and read the final tick per phase:
-- `terminal_reason=max_turns` (or similar cutoff) → confirms a turn-budget
-  problem: the model gets stuck chasing dead-end sources for hard
-  candidates and runs out of turns before recording anything, even the
-  easy ones. Fix is probably in `EXTRACTION_PROMPT_TEMPLATE`
-  (`phases/extraction.py`) — e.g. instruct it to call `record_product` for
-  each candidate as soon as it has enough, rather than working through all
-  12 before recording any.
-- `terminal_reason=completed` with the same zero-`record_product` outcome
-  → the model chose to stop on its own without recording anything, which
-  points at the extraction research-protocol skill needing a stronger
-  nudge rather than a budget fix.
-
-Resolve (or at least understand) this before spending money on the `rich`
-golden-set capture below — espresso machines is exactly this
-`coverage=rich` shape, and capturing it while this bug is live risks
-freezing a broken/empty case into the golden set.
-
-### 2. Capture the other 4 golden-set cases (§17.1) — main remaining item
+### 1. Capture the other 4 golden-set cases (§17.1) — main remaining item
 
 `eval/capture.py` (committed) is proven end-to-end for one category —
 adapt it for the remaining 4. Recommended categories, reasoned out in a
@@ -114,7 +71,7 @@ isolate a verification run to just the case(s) it actually needs by
 temporarily moving the others out of `eval/cases/` — most relevant for
 the regression test below, which only needs the `rich` case in play.
 
-### 3. Once all 5 exist
+### 2. Once all 5 exist
 
 - Run `scout eval --stable-only` for real, confirm all 5 pass.
 - **The prose-edit regression test, deferred this session** because no
@@ -135,7 +92,7 @@ the regression test below, which only needs the `rich` case in play.
   since it's never been run.
 - Flip CLAUDE.md's step 15 checkbox.
 
-### 4. §17.2 build-time verification items — not started, need a live run
+### 3. §17.2 build-time verification items — not started, need a live run
 
 - **Geo-redirect check (§10.6).** Fetch several known geo-redirecting
   retailers, observe what actually comes back. Can't be faked or unit
@@ -147,6 +104,75 @@ the regression test below, which only needs the `rich` case in play.
   model" with a stated preference for the top end regardless of cost).
 
 ## Resolved this session — don't re-litigate
+
+- **EXTRACTION recorded zero products on `rich`/high-differentiation
+  categories (2026-08-31 session).** Reproduced live, repeatedly, on
+  "Pickleball Paddles" (`coverage=rich`, `differentiation=high`): SURVEY
+  and REFINE succeeded, EXTRACTION got a real 10-candidate list, made real
+  fetches, and recorded **zero** products — not a cost-cap truncation
+  (`RunBudget` never tripped).
+
+  Four candidate explanations were checked, in order, each with evidence,
+  three ruled out:
+  1. *App-level orchestration loop bug* in `run_survey`'s §8.2 broadening
+     interrupt — ruled out for free (zero API cost):
+     `tests/test_survey.py`'s `FakeSurveyor` tests (35/35 passing) already
+     prove `.survey()` is called at most once when the port answers "keep"
+     (which `EvalQuestionPort` always does).
+  2. *SDK/session-level restart* — a single `query()` call's own message
+     stream can emit more than one terminal `ResultMessage` (confirmed as
+     real, separate SDK behavior on SURVEY itself: a method-level call
+     counter showed `call_counts=1` while `tick_counts=2`, i.e. one Python
+     call, two billed segments) — checked directly against EXTRACTION with
+     the same instrumentation and ruled out as *this* bug's cause:
+     `call_counts=1`/`tick_counts=1`, exactly 1:1, still 0 products.
+  3. *Turn-budget cutoff* — ruled out: `terminal_reason=completed`,
+     `num_turns=102`, the model finished on its own initiative, not cut
+     off mid-research.
+  4. *Batching every `record_product` call to the end* — tested with a
+     prompt fix ("work one candidate at a time, record before moving on")
+     and verified live: turn count dropped sharply (102→19) but still 0
+     products recorded. Ruled out.
+
+  **Actual root cause**, found in the fetch log: EXTRACTION's
+  `allowed_tools` never included `WebSearch` (`docs/handoff.md` §3's own
+  original worked example — `["WebFetch", "mcp__scout__record_product"]`
+  only), a deliberate v7 design choice assuming a candidate's manufacturer
+  page could always be reached by a URL guessed from its bare name
+  (`Cluster.exemplar_products` is deliberately unsourced, §8.1a). For a
+  many-small-brand `rich` category that assumption fails: the model fell
+  back to fetching retailer search-result pages and brand homepages, never
+  a real per-product page, so it never had citable evidence to record.
+
+  **Fix applied and verified live:** gave EXTRACTION `WebSearch`, capped at
+  a new `config.MAX_EXTRACTION_SEARCHES_PER_PRODUCT=1` per candidate (soft,
+  prompt-referenced, same pattern as the other per-phase caps — enough to
+  resolve "what's the real URL," not a second broad research pass);
+  `MAX_RUN_SEARCHES` raised 40→55 for headroom; `EXTRACTION_PROMPT_TEMPLATE`
+  explains when to search and warns against ever treating a retailer
+  search-results page as a source; `docs/handoff.md` §3 updated with a
+  dated inline amendment note (not a version bump — this is a narrow,
+  evidence-backed post-freeze correction, the same pattern
+  `_repair_comparison_specs`/§4.3-on-`secondhand_risk_factors` already set,
+  not a new external-review round). All 827 tests still pass. **Verified
+  live: 10/10 candidates recorded** (was 0/10, repeatedly, before the fix)
+  — $1.11, `fetches=42/120`, `searches=13/55`, clean single call/tick, no
+  session-restart recurrence.
+
+  Not yet re-verified against a second `rich`-shaped category — the
+  espresso-machines golden-set capture (item 1 above) doubles as that
+  second confirmation.
+
+  Diagnostic method worth reusing if a similar live-SDK-behavior question
+  comes up again: a throwaway probe script (not committed) wrapping each
+  phase's bound `query` name to track cumulative `total_cost_usd` and print
+  one line per `ResultMessage`; a method-level call counter around the
+  `Sdk*` class method itself (not just the message stream) to distinguish
+  "called once" from "one call, multiple billed segments"; a self-enforcing
+  cost cap that raises from inside the wrapped generator instead of relying
+  on a human to notice and kill the process; and JSON caching of
+  intermediate phase outputs so a phase already paid for is never re-paid
+  for. Total live spend across this investigation: ~$6.49.
 
 - **The extraction-candidate-scope-vs-run-budget tradeoff** (previously
   flagged as a deliberately-deferred open question) **is now fixed**:
@@ -183,8 +209,14 @@ the regression test below, which only needs the `rich` case in play.
 - `eval/cases/software/` — the one captured case so far.
 - `src/product_scout/orchestrator.py` — `_extraction_candidates()`, now
   fixed.
-- `src/product_scout/hooks/progress.py` — new this session: per-tool-call
-  and per-phase `ResultMessage` progress ticks (§16.2); the diagnostic
-  instrumentation item 1 above depends on.
-- `docs/handoff.md` §17.1/§17.2 — the authoritative spec for all of this.
+- `src/product_scout/hooks/progress.py` — per-tool-call and per-phase
+  `ResultMessage` progress ticks (§16.2); the EXTRACTION bug investigation
+  above relied on this instrumentation.
+- `src/product_scout/phases/extraction.py` — `EXTRACTION_PROMPT_TEMPLATE`
+  and `SdkExtractor.extract()`'s `allowed_tools`, both changed by the
+  2026-08-31 fix above.
+- `src/product_scout/config.py` — `MAX_EXTRACTION_SEARCHES_PER_PRODUCT`
+  (new) and `MAX_RUN_SEARCHES` (raised), same fix.
+- `docs/handoff.md` §3 (EXTRACTION's tool list, amended post-v7) and
+  §17.1/§17.2 — the authoritative spec for all of this.
 - `CLAUDE.md` — checklist, the eleven invariants, commands.

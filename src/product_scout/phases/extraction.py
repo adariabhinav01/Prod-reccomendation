@@ -2,11 +2,33 @@
 step 8).
 
 Fetch pages, extract specs into the validated schema, Haiku, `WebFetch` +
-`mcp__scout__record_product`. Mirrors `phases/survey.py`'s convention: an
-`Extractor` seam, thin pure orchestration on top of it, and a real
-SDK-calling adapter — `phases/survey.py`'s own docstring is the template
-this module follows, including its two deliberate departures from the
-pre-v7 debt this file used to carry.
+`WebSearch` + `mcp__scout__record_product`. Mirrors `phases/survey.py`'s
+convention: an `Extractor` seam, thin pure orchestration on top of it, and
+a real SDK-calling adapter — `phases/survey.py`'s own docstring is the
+template this module follows, including its two deliberate departures from
+the pre-v7 debt this file used to carry.
+
+### `WebSearch` — added post-v7, not in the original spec
+
+§3's original worked example gave this phase `WebFetch` only, on the
+assumption a candidate's manufacturer page could always be reached by a
+guessed/constructed URL from its bare name (`Cluster.exemplar_products`,
+§8.1a — deliberately unsourced, no URL attached). Live verification
+against a `rich`/high-differentiation category (many small brands, no
+single guessable URL pattern) showed this fails in exactly that shape: the
+model fell back to fetching retailer search-result pages and brand
+homepages, never reached a real per-product page, and recorded zero
+products across every candidate despite genuine effort (102 turns, 67
+fetches, `terminal_reason=completed`) — not a turn-budget cutoff, not a
+batching problem (tested independently first), a genuine discovery gap.
+`WebSearch` is capped far tighter than SURVEY's own budget
+(`config.MAX_EXTRACTION_SEARCHES_PER_PRODUCT`, see that constant's own
+comment) — a fallback for resolving "what's the real URL for this
+candidate," not a second broad research pass. §4.3's admissibility rule is
+unchanged: a URL only ever seen via search still isn't admissible as a
+spec/price source until it's actually fetched with `WebFetch` in the same
+conversation — search only helps find WHAT to fetch, never substitutes for
+fetching it. `docs/handoff.md` §3 has the matching amendment note.
 
 Unlike SURVEY, extraction's correctness does not depend on parsing any
 free text at all: every `Product` that ends up in the result arrived
@@ -72,6 +94,26 @@ product below in "{product_type}", fetch its manufacturer page and up to \
 record_product exactly once per product with everything you found. Report \
 generation as "current" — prior-generation research is a separate pass, \
 not your job here.
+
+WORK ONE CANDIDATE AT A TIME, IN ORDER. Research a single candidate — its \
+manufacturer page plus up to {max_fetches_per_product} review/spec pages — \
+then call record_product for THAT candidate before starting research on \
+the next one. Do not fetch broadly across many or all candidates first and \
+save every record_product call for the end: if you run out of turns, a \
+partially-researched product you already recorded is far more useful than \
+a well-researched one you never recorded. A thin-but-recorded entry beats \
+a thorough-but-missing one every time.
+
+You do NOT already know each candidate's manufacturer page URL. If you \
+cannot confidently construct it from the candidate's name alone, use \
+WebSearch — at most {max_searches_per_product} searches per candidate — to \
+find it, then WebFetch the real page it points to. Never guess a retailer \
+search-results URL (e.g. a site's `?q=`/`/s?k=` search endpoint) and treat \
+whatever it returns as a product page; those pages are not reliable \
+sources and fetching one is not a substitute for finding the real one. A \
+URL you only saw in search results is never itself an admissible source \
+for a spec or the price — you still have to WebFetch the real page in this \
+same conversation before citing it.
 
 If you cannot find a real, citable http(s) URL for a spec, OMIT that spec \
 entirely from the `specs` you send — never invent or guess a URL. A \
@@ -196,6 +238,7 @@ class SdkExtractor:
         prompt = EXTRACTION_PROMPT_TEMPLATE.format(
             product_type=product_type,
             max_fetches_per_product=config.MAX_EXTRACTION_FETCHES_PER_PRODUCT,
+            max_searches_per_product=config.MAX_EXTRACTION_SEARCHES_PER_PRODUCT,
             location_country=location.country,
             location_currency=location.currency,
             low_evidence_mode=low_evidence_mode,
@@ -203,7 +246,7 @@ class SdkExtractor:
         )
         options = ClaudeAgentOptions(
             model=self._model,
-            allowed_tools=["WebFetch", "mcp__scout__record_product"],
+            allowed_tools=["WebFetch", "WebSearch", "mcp__scout__record_product"],
             permission_mode="default",  # no phase writes files; §3.2
             setting_sources=["project"],
             mcp_servers={"scout": scout_server},

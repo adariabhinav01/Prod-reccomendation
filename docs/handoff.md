@@ -117,7 +117,7 @@ PHASES = {
     "survey":     dict(model=HAIKU, tools=["WebSearch", "WebFetch"]),
     "refine":     dict(model=OPUS,  tools=["mcp__scout__ask_topic",
                                            "mcp__scout__ask_choice"]),
-    "extraction": dict(model=HAIKU, tools=["WebFetch",
+    "extraction": dict(model=HAIKU, tools=["WebFetch", "WebSearch",
                                            "mcp__scout__record_product"]),
     "timing":     dict(model=HAIKU, tools=["WebSearch", "WebFetch"]),
     "prior_gen":  dict(model=HAIKU, tools=["WebSearch", "WebFetch"]),
@@ -141,6 +141,8 @@ async def run_phase(name: str, prompt: str) -> str:
             result = msg.result
     return result
 ```
+
+**Amendment, post-v7 (added after live verification, not part of the original external review rounds):** EXTRACTION's tool list originally read `["WebFetch", "mcp__scout__record_product"]` — no `WebSearch` — on the assumption a candidate's manufacturer page could always be reached by a URL guessed/constructed from its bare name (`Cluster.exemplar_products`, §8.1a, deliberately unsourced). Live verification against a `rich`/high-differentiation category showed this assumption fails in exactly that shape: many small brands, no single guessable URL pattern, and the model fell back to fetching retailer search-result pages and brand homepages via `WebFetch` alone, never reaching a real per-product page, recording zero products across every candidate despite a genuine, unhurried attempt (`terminal_reason=completed`, not a turn-budget cutoff). `WebSearch` is now included above, but capped far tighter than SURVEY's own budget (`MAX_EXTRACTION_SEARCHES_PER_PRODUCT`, currently 1 per candidate) — a fallback for resolving "what's the real URL for this candidate," not a second broad research pass. §4.3's admissibility rule is unchanged by this: a URL only ever seen via search still isn't an admissible spec/price source until it's actually fetched with `WebFetch` in the same conversation.
 
 ### 3.1 No conversational carryover
 
